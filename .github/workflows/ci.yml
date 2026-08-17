@@ -23,11 +23,11 @@ jobs:
       # standard, which is guidance for humans and agents reading the code — nothing in
       # the build or the tests reads it. Fetching it would make CI depend on a token with
       # access to another private repo, for no benefit.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # 24, not 22: the migration CLI is a .ts entrypoint run directly by node, and
           # type stripping is only unflagged from 23.6 onward. On 22 it would need
@@ -78,9 +78,9 @@ jobs:
         working-directory: apps/extractor
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
 
@@ -103,7 +103,7 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # UC-0 acceptance criterion: no key-shaped string outside .env.example placeholders.
       - name: Check for committed secrets
