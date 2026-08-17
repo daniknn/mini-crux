@@ -1,0 +1,30 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  // Secrets arrive from Doppler at runtime. Listing them here is not about supplying
+  // values — it tells Turborepo they are part of a task's cache key, so a build made
+  // against one Clerk instance is never replayed for another.
+  "globalEnv": [
+    "CLERK_SECRET_KEY",
+    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+    "SUPABASE_DB_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "SUPABASE_URL"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {},
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "dependsOn": ["^build"]
+    }
+  }
+}

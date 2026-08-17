@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Daily Brew tokens (DashOne §2). Dark-first: this is an operator surface.
+ * Never hardcode a hex outside this file — components use the token names.
+ * Primary is Luminous Blue 223 100% 55%. Never purple.
+ */
+
+@layer base {
+  :root {
+    --background: 0 0% 4%; /* #0a0a0a page */
+    --foreground: 0 0% 98%;
+
+    --card: 0 0% 8%; /* #141414 */
+    --card-foreground: 0 0% 98%;
+
+    --muted: 0 0% 12%; /* #1f1f1f sunken */
+    --muted-foreground: 0 0% 64%;
+
+    --primary: 223 100% 55%; /* #1a5cff Luminous Blue */
+    --primary-foreground: 0 0% 100%;
+
+    --border: 0 0% 16%;
+    --input: 0 0% 16%;
+    --ring: 223 100% 55%;
+
+    --radius: 1rem; /* lg 16px — sm 8px and xl 20px come from the Tailwind scale */
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  /*
+   * A visible focus state is required on every interactive element (WCAG AA + DashOne §2).
+   * Implemented as a box-shadow ring, never a colored outline, so it stays visible against
+   * both the page and card surfaces.
+   */
+  :focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgb(26 92 255 / 0.4);
+  }
+}
+
+/* Motion is a courtesy, not a requirement — honor the OS setting. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .active\:scale-\[0\.97\]:active {
+    transform: none !important;
+  }
+}

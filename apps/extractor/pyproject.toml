@@ -1,0 +1,32 @@
+[project]
+name = "mini-crux-extractor"
+version = "0.1.0"
+description = "Structural video feature extraction for Mini Crux creatives."
+requires-python = ">=3.12"
+
+# UC-0 pins only what the job loop needs. The heavy CV/audio stack (opencv-python,
+# easyocr, faster-whisper, librosa) lands in UC-2 with the extraction code itself —
+# adding ~2GB of wheels before there is anything to extract only slows CI down.
+dependencies = [
+    "asyncpg>=0.30.0",
+    "python-ulid>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/extractor"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# Warnings are errors. A DeprecationWarning here is a future breakage, not noise.
+filterwarnings = ["error"]

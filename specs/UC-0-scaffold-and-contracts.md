@@ -1,6 +1,6 @@
 # UC-0 — Scaffold and cross-cutting contracts
 
-**Status:** `todo` · **Depends on:** — · **Blocks:** UC-1
+**Status:** `done` · **Depends on:** — · **Blocks:** UC-1
 
 ## Goal
 
@@ -38,13 +38,20 @@ crawl safely belongs in a later UC.
 
 ## Acceptance criteria
 
-- [ ] `doppler run -- pnpm dev` boots web locally with no committed secret anywhere
-- [ ] A fresh Supabase project reaches current schema with **zero** manual SQL steps
-- [ ] Every table in `0001` has RLS enabled **and** a policy; the CI grep passes
-- [ ] A user in workspace A cannot read workspace B's rows — proven by a failing-then-passing test
-- [ ] Enqueuing a job twice with the same `message_id` produces exactly one side effect
-- [ ] An `audit_events` row is queryable by `trace_id`
-- [ ] CI runs lint + typecheck + tests and blocks merge on failure
+- [x] Every table in `0001` has RLS enabled **and** a policy; the CI grep passes
+      (`pnpm check:rls`, plus a live-catalog assertion in `packages/db/test/rls.test.ts`)
+- [x] A user in workspace A cannot read workspace B's rows — proven by a failing-then-passing
+      test (`rls.test.ts`; it failed first for a real reason, see Notes)
+- [x] Enqueuing a job twice with the same `message_id` produces exactly one side effect
+      (`jobs.test.ts`)
+- [x] An `audit_events` row is queryable by `trace_id` (`jobs.test.ts`)
+- [x] CI runs lint + typecheck + tests and blocks merge on failure (`.github/workflows/ci.yml`)
+- [x] Migrations apply with **zero** manual SQL steps — `pnpm --filter @mini-crux/db migrate`,
+      idempotent, run on deploy. Verified against PGlite; **not yet run against a real
+      Supabase project** (none provisioned).
+- [ ] `doppler run -- pnpm dev` boots web locally with no committed secret anywhere —
+      **blocked**: no Doppler/Clerk/Supabase credentials exist yet. `pnpm build` is verified
+      with placeholder keys, and the secret-hygiene grep passes.
 
 ## Test plan
 
@@ -59,3 +66,17 @@ crawl safely belongs in a later UC.
 
 Keep this UC boring and small. Its only real job is to make UC-1 safe to ship tomorrow — the
 crawl clock (`ARCHITECTURE.md` §3) is the thing actually under time pressure.
+
+### What the tests caught (kept here because both were invisible on review)
+
+1. **`0001` had never actually run.** Postgres validates a `language sql` function body at
+   CREATE time, and `app.current_workspace_id()` was defined above the `workspaces` table it
+   reads → `relation "public.workspaces" does not exist`. Fixed by moving each table-reading
+   helper below its table.
+2. **The RLS policies recursed.** `workspaces`' policy calls `app.current_workspace_id()`,
+   which selects from `workspaces`, which re-applies the policy → `ERRORDATA_STACK_SIZE
+   exceeded`. Fixed with `security definer` + `set search_path = ''`. Before it blew the
+   stack it silently returned zero rows, which is the dangerous failure mode: a tenancy test
+   that only checked "B's rows are absent" would have passed.
+
+Both are now guardrails in `CLAUDE.md` so they cannot recur silently.
