@@ -19,9 +19,11 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      # No `submodules: true`: `.dashone` is a private repo holding the engineering
+      # standard, which is guidance for humans and agents reading the code — nothing in
+      # the build or the tests reads it. Fetching it would make CI depend on a token with
+      # access to another private repo, for no benefit.
       - uses: actions/checkout@v4
-        with:
-          submodules: true
 
       - uses: pnpm/action-setup@v4
 
