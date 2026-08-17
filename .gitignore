@@ -1,0 +1,30 @@
+# Secrets — Doppler is the source of truth; never commit real values
+.env
+.env.local
+.env.*.local
+
+# Node
+node_modules/
+.next/
+.turbo/
+dist/
+*.tsbuildinfo
+
+# Python (apps/extractor)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Media & model caches — large binaries, reproducible from Storage
+data/raw_media/
+data/models/
+*.mp4
+*.mov
+
+# Platform
+.vercel/
+.fly/
+.DS_Store

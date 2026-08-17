@@ -1,0 +1,13 @@
+# Doppler is the ONLY source of truth for secrets (DashOne §3).
+# Configure the project + configs in the Doppler dashboard, then enable the native
+# integrations to push secrets to Vercel, Fly.io, and Supabase — never duplicate by hand.
+#
+# Project: mini-crux
+# Configs:  dev  → local + Vercel Preview + Fly dev app + Supabase dev project
+#           stg  → Vercel Preview (staging branch) + Fly stg app + Supabase stg project
+#           prd  → Vercel Production + Fly prd app + Supabase prod project
+#
+# Local dev:  doppler run -- pnpm dev
+setup:
+  project: mini-crux
+  config: dev

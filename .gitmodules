@@ -1,0 +1,3 @@
+[submodule ".dashone"]
+	path = .dashone
+	url = https://github.com/JuliusCesarius/dashone-guidelines
