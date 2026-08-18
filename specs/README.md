@@ -23,6 +23,12 @@ starts the day UC-1 lands, and it runs in the background while UC-2 through UC-4
 | [UC-3](UC-3-survival-panel.md) | Survival derivation with censoring | `done` | UC-1 |
 | [UC-4](UC-4-descriptive-dashboard.md) | Descriptive competitive dashboard (Layer 1) | `done` | UC-2, UC-3 |
 | [UC-5](UC-5-correlational-analysis.md) | Cohort contrast analysis (Layer 2) | `done` | UC-3, UC-4 |
+| [UC-6](UC-6-go-live.md) | Go live: closing the loop between the tick and the panel | `in-progress` | UC-1, UC-2, UC-5 |
+
+UC-6 is the one that makes the sequencing rationale above true rather than aspirational. The
+daily tick has been enqueueing `crawl` jobs that no process consumes, so the clock that was
+supposed to start with UC-1 has not started. Until UC-6 lands, the 8-week count is not going
+down.
 
 UC-5 is the exception to "the panel needs 8 weeks first". What it ships now is the **gate**: the
 analysis refuses on a thin panel and states how much longer it needs. The engine is built and
