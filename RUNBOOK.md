@@ -294,13 +294,55 @@ It goes through the scheduler's own `app.enqueue_daily_crawls`, then the same cr
 parse path a scheduled run takes — a manual recovery cannot diverge from a normal day.
 `--date` only reaches back to a day the Ad Library still shows, which is today.
 
-**Re-run an analysis by hand.** The tick skips a workspace that already has an
-`analysis_runs` row for the panel date, and the partial unique index only blocks a *second
-in-flight* job — so deleting nothing and simply enqueueing again works:
+**Analyze a panel the tick skipped.** If a workspace has a `succeeded` crawl for the date and
+no run yet — the usual cause is the 16:00 UTC tick firing before a late crawl landed:
 ```sql
 select app.enqueue_daily_analysis('2026-03-10'::date);
 ```
-Returns the number of jobs created. `0` means one already exists for that date.
+Returns the number of jobs created, across every workspace in that state. **`0` is the normal
+answer once the panel has been analyzed**, and it does not mean the call failed: the tick
+skips any workspace that already has an `analysis_runs` row for the date. To analyze that date
+*again*, see below — `enqueue_daily_analysis` will never do it.
+
+**Force a re-analysis of a date already analyzed.** Enqueue the job directly. This is the one
+operation with no function wrapping it, because nothing scheduled should ever want it:
+```sql
+insert into public.jobs (workspace_id, message_id, type, payload, trace_id, actor)
+values (
+  '<workspace-uuid>',
+  app.new_ulid('msg_'),
+  'analysis',
+  jsonb_build_object('panel_date', '2026-03-10'),
+  app.new_ulid('trc_'),
+  jsonb_build_object('type', 'operator', 'id', '<your-name>', 'label', 're-analysis')
+);
+```
+Three things make this safe, and each would otherwise look like a reason not to do it:
+
+- **Do not delete the old `analysis_runs` row first.** You cannot — it is append-only, guarded
+  by a trigger, not just a revoke. The new run is appended alongside it, and the old one
+  becomes history rather than a conflict.
+- **The fresh `message_id` is the point.** The handler wraps `runAnalysis` in the idempotency
+  ledger keyed on exactly that value, so reusing the previous job's id would record the job as
+  already processed and skip the work silently.
+- **The unique index will refuse a duplicate while one is in flight** — it covers `analysis`
+  jobs in `pending` or `running` for that `(workspace_id, panel_date)`. If the insert raises a
+  unique violation, an analysis for that date is already queued and you want to wait for it,
+  not force a second.
+
+What the operator sees afterwards depends on *which* date was re-analyzed, and this is the
+part that wastes an hour if it is not said here. The analysis page renders the **newest run in
+the workspace**, ordered by `created_at` and not by panel date. Re-analyzing today's panel
+therefore replaces what is on screen; re-analyzing a date from last week appends a run that
+nothing displays, and it is read back with a direct query:
+```sql
+select id, created_at, outcome, failed_gate, n_long, n_short
+from public.analysis_runs
+where workspace_id = '<workspace-uuid>' and panel_date = '2026-03-10'
+order by created_at desc;
+```
+Either way, say so to whoever reads the panel: a second run of the same date over extractions
+that have since completed is a legitimately different answer, and it will not look like one.
 
 **Extraction backlog** — creatives with no current features row:
 ```bash
