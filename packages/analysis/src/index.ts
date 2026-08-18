@@ -30,5 +30,30 @@ export {
 } from './gating.ts'
 export type { GateDetail, GateId, GateInput, GatePass, GateRefusal, GateVerdict } from './gating.ts'
 export { erfc, twoSidedNormalP } from './normal.ts'
+export {
+  classifyProxyAd,
+  classifyProxyCorpus,
+  deriveVerdict,
+  evaluateProxyValidationGate,
+  MIN_ADVERTISERS_USED,
+  MIN_FINISHED_ADS,
+} from './proxy-validation.ts'
+export type {
+  ClassifiedProxyAd,
+  ProxyCorpusClassification,
+  ProxyExclusionReason,
+  ProxyGateDetail,
+  ProxyGateId,
+  ProxyGateInput,
+  ProxyGatePass,
+  ProxyGateRefusal,
+  ProxyGateVerdict,
+  ProxyVerdict,
+  RawProxyAd,
+  ReachBound,
+} from './proxy-validation.ts'
+export { CONFIDENCE_ALPHA, naivePooledEstimate, withinAdvertiserRegression } from './regression.ts'
+export type { FinishedAd, NaiveEstimate, WithinAdvertiserRegression } from './regression.ts'
+export { regularizedIncompleteBeta, studentTCritical, twoSidedStudentP } from './student-t.ts'
 export { vanElteren } from './van-elteren.ts'
 export type { ContrastResult, Stratum } from './van-elteren.ts'

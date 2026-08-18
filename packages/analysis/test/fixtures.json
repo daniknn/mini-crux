@@ -437,5 +437,936 @@
       "z": 8.0,
       "p": 1.244192114854348e-15
     }
+  ],
+  "regression": [
+    {
+      "name": "general_case",
+      "why": "Three advertisers, an ordinary shape, beta away from both 0 and 1. The published case \u2014 cross-checked against dummy-variable OLS to 1e-9, as the spec requires.",
+      "ads": [
+        {
+          "advertiser": "adv_a",
+          "days": 5,
+          "reach": 400
+        },
+        {
+          "advertiser": "adv_a",
+          "days": 10,
+          "reach": 1500
+        },
+        {
+          "advertiser": "adv_a",
+          "days": 20,
+          "reach": 5200
+        },
+        {
+          "advertiser": "adv_a",
+          "days": 40,
+          "reach": 22000
+        },
+        {
+          "advertiser": "adv_b",
+          "days": 8,
+          "reach": 900
+        },
+        {
+          "advertiser": "adv_b",
+          "days": 16,
+          "reach": 2600
+        },
+        {
+          "advertiser": "adv_b",
+          "days": 32,
+          "reach": 6200
+        },
+        {
+          "advertiser": "adv_c",
+          "days": 6,
+          "reach": 300
+        },
+        {
+          "advertiser": "adv_c",
+          "days": 12,
+          "reach": 700
+        },
+        {
+          "advertiser": "adv_c",
+          "days": 24,
+          "reach": 1900
+        },
+        {
+          "advertiser": "adv_c",
+          "days": 48,
+          "reach": 5100
+        }
+      ],
+      "expected": {
+        "beta": 1.6003804998388622,
+        "betaMinusOne": 0.6003804998388622,
+        "se": 0.10257341800095549,
+        "ciLow": 1.357832908065039,
+        "ciHigh": 1.8429280916126853,
+        "tStat": 5.853178255532731,
+        "pValue": 0.0006285700797495076,
+        "df": 7,
+        "n": 11,
+        "advertisersUsed": 3,
+        "advertisersDropped": 0,
+        "betaDummyOls": 1.600380499838864
+      },
+      "naive": {
+        "pooledBeta": 1.5298524907926252,
+        "pearsonR": 0.8988011971726398,
+        "n": 11
+      }
+    },
+    {
+      "name": "singleton_advertiser_dropped",
+      "why": "`general_case` plus one advertiser with a single finished ad. Its residuals are exactly zero after demeaning, so it must be dropped and counted, and beta/se/df must be byte-for-byte identical to the same corpus with that row absent \u2014 asserted below, not just claimed.",
+      "ads": [
+        {
+          "advertiser": "adv_a",
+          "days": 5,
+          "reach": 400
+        },
+        {
+          "advertiser": "adv_a",
+          "days": 10,
+          "reach": 1500
+        },
+        {
+          "advertiser": "adv_a",
+          "days": 20,
+          "reach": 5200
+        },
+        {
+          "advertiser": "adv_a",
+          "days": 40,
+          "reach": 22000
+        },
+        {
+          "advertiser": "adv_b",
+          "days": 8,
+          "reach": 900
+        },
+        {
+          "advertiser": "adv_b",
+          "days": 16,
+          "reach": 2600
+        },
+        {
+          "advertiser": "adv_b",
+          "days": 32,
+          "reach": 6200
+        },
+        {
+          "advertiser": "adv_c",
+          "days": 6,
+          "reach": 300
+        },
+        {
+          "advertiser": "adv_c",
+          "days": 12,
+          "reach": 700
+        },
+        {
+          "advertiser": "adv_c",
+          "days": 24,
+          "reach": 1900
+        },
+        {
+          "advertiser": "adv_c",
+          "days": 48,
+          "reach": 5100
+        },
+        {
+          "advertiser": "adv_solo",
+          "days": 15,
+          "reach": 1000
+        }
+      ],
+      "expected": {
+        "beta": 1.6003804998388622,
+        "betaMinusOne": 0.6003804998388622,
+        "se": 0.10257341800095549,
+        "ciLow": 1.357832908065039,
+        "ciHigh": 1.8429280916126853,
+        "tStat": 5.853178255532731,
+        "pValue": 0.0006285700797495076,
+        "df": 7,
+        "n": 11,
+        "advertisersUsed": 3,
+        "advertisersDropped": 1,
+        "betaDummyOls": 1.6003804998388633
+      },
+      "naive": {
+        "pooledBeta": 1.5339125683666983,
+        "pearsonR": 0.8898196428477365,
+        "n": 12
+      }
+    },
+    {
+      "name": "df_matters",
+      "why": "Eight advertisers with two ads each: A is a large share of n, so `df = n - A - 1` (7) and the naive `n - 2` (14) diverge sharply, and the p-values they produce are orders of magnitude apart even though both happen to reject here \u2014 using the wrong df would still be wrong, just not caught by a fixture that only checks the verdict.",
+      "ads": [
+        {
+          "advertiser": "adv_0",
+          "days": 6,
+          "reach": 572.8941190785816
+        },
+        {
+          "advertiser": "adv_0",
+          "days": 18,
+          "reach": 2400.820111530865
+        },
+        {
+          "advertiser": "adv_1",
+          "days": 10,
+          "reach": 1755.1573726375786
+        },
+        {
+          "advertiser": "adv_1",
+          "days": 25,
+          "reach": 6417.1521722881025
+        },
+        {
+          "advertiser": "adv_2",
+          "days": 4,
+          "reach": 204.68760388177137
+        },
+        {
+          "advertiser": "adv_2",
+          "days": 14,
+          "reach": 1015.4658808923276
+        },
+        {
+          "advertiser": "adv_3",
+          "days": 8,
+          "reach": 1888.323221086673
+        },
+        {
+          "advertiser": "adv_3",
+          "days": 30,
+          "reach": 12548.759764740771
+        },
+        {
+          "advertiser": "adv_4",
+          "days": 12,
+          "reach": 1769.6327916101704
+        },
+        {
+          "advertiser": "adv_4",
+          "days": 20,
+          "reach": 3355.5817228694705
+        },
+        {
+          "advertiser": "adv_5",
+          "days": 5,
+          "reach": 1703.7710547976467
+        },
+        {
+          "advertiser": "adv_5",
+          "days": 15,
+          "reach": 7895.022411114013
+        },
+        {
+          "advertiser": "adv_6",
+          "days": 9,
+          "reach": 784.5285501987623
+        },
+        {
+          "advertiser": "adv_6",
+          "days": 27,
+          "reach": 3217.576834918473
+        },
+        {
+          "advertiser": "adv_7",
+          "days": 7,
+          "reach": 1232.4237473184185
+        },
+        {
+          "advertiser": "adv_7",
+          "days": 21,
+          "reach": 5650.35561856347
+        }
+      ],
+      "expected": {
+        "beta": 1.3528327132664002,
+        "betaMinusOne": 0.3528327132664002,
+        "se": 0.024151714047278033,
+        "ciLow": 1.2957229845126725,
+        "ciHigh": 1.4099424420201279,
+        "tStat": 14.60901336342898,
+        "pValue": 1.6819397210344623e-06,
+        "df": 7,
+        "n": 16,
+        "advertisersUsed": 8,
+        "advertisersDropped": 0,
+        "betaDummyOls": 1.3528327132664004
+      },
+      "naive": {
+        "pooledBeta": 1.3846097807600013,
+        "pearsonR": 0.8233876119863557,
+        "n": 16
+      }
+    },
+    {
+      "name": "near_proportional_accumulation",
+      "why": "The fixture the naive design would have failed: reach tracks `rate * days` almost exactly, with only small multiplicative jitter per ad. Beta lands within noise of 1 and the t-test against beta=1 must NOT reject \u2014 this is what 'the proxy measures inertia, not performance' looks like arithmetically.",
+      "ads": [
+        {
+          "advertiser": "adv_0",
+          "days": 6,
+          "reach": 242.4
+        },
+        {
+          "advertiser": "adv_0",
+          "days": 12,
+          "reach": 475.2
+        },
+        {
+          "advertiser": "adv_0",
+          "days": 24,
+          "reach": 979.2
+        },
+        {
+          "advertiser": "adv_0",
+          "days": 48,
+          "reach": 1881.6
+        },
+        {
+          "advertiser": "adv_1",
+          "days": 8,
+          "reach": 509.59999999999997
+        },
+        {
+          "advertiser": "adv_1",
+          "days": 16,
+          "reach": 1060.8
+        },
+        {
+          "advertiser": "adv_1",
+          "days": 32,
+          "reach": 2080.0
+        },
+        {
+          "advertiser": "adv_2",
+          "days": 5,
+          "reach": 125.0
+        },
+        {
+          "advertiser": "adv_2",
+          "days": 10,
+          "reach": 252.5
+        },
+        {
+          "advertiser": "adv_2",
+          "days": 20,
+          "reach": 495.0
+        },
+        {
+          "advertiser": "adv_2",
+          "days": 40,
+          "reach": 1000.0
+        },
+        {
+          "advertiser": "adv_3",
+          "days": 7,
+          "reach": 623.7
+        },
+        {
+          "advertiser": "adv_3",
+          "days": 14,
+          "reach": 1260.0
+        },
+        {
+          "advertiser": "adv_3",
+          "days": 28,
+          "reach": 2545.2
+        },
+        {
+          "advertiser": "adv_4",
+          "days": 9,
+          "reach": 504.90000000000003
+        },
+        {
+          "advertiser": "adv_4",
+          "days": 18,
+          "reach": 970.1999999999999
+        },
+        {
+          "advertiser": "adv_4",
+          "days": 36,
+          "reach": 1980.0
+        },
+        {
+          "advertiser": "adv_4",
+          "days": 72,
+          "reach": 3999.6
+        }
+      ],
+      "expected": {
+        "beta": 0.9996372665256252,
+        "betaMinusOne": -0.00036273347437476566,
+        "se": 0.005298922354834271,
+        "ciLow": 0.9880919065155018,
+        "ciHigh": 1.0111826265357486,
+        "tStat": -0.06845419692625607,
+        "pValue": 0.9465515092969019,
+        "df": 12,
+        "n": 18,
+        "advertisersUsed": 5,
+        "advertisersDropped": 0,
+        "betaDummyOls": 0.9996372665256249
+      },
+      "naive": {
+        "pooledBeta": 1.027951773597463,
+        "pearsonR": 0.8712151224628654,
+        "n": 18
+      }
+    },
+    {
+      "name": "dominant_advertiser_confound",
+      "why": "Three small advertisers whose reach barely moves with duration (flat internally) plus one advertiser that both runs far longer and buys far more reach, sitting on its own cluster far out on both axes. Pooling reads the between-advertiser budget gap as 'longer ads get disproportionately more reach' (beta well above 1, r near 0.97) \u2014 a confident, spurious validation. Fixed effects see through it: the within-advertiser slope is barely above 0. This is the fixture the whole UC exists to make impossible to miss.",
+      "ads": [
+        {
+          "advertiser": "adv_small_a",
+          "days": 4,
+          "reach": 1200
+        },
+        {
+          "advertiser": "adv_small_a",
+          "days": 6,
+          "reach": 1250
+        },
+        {
+          "advertiser": "adv_small_a",
+          "days": 9,
+          "reach": 1300
+        },
+        {
+          "advertiser": "adv_small_b",
+          "days": 5,
+          "reach": 900
+        },
+        {
+          "advertiser": "adv_small_b",
+          "days": 8,
+          "reach": 950
+        },
+        {
+          "advertiser": "adv_small_b",
+          "days": 12,
+          "reach": 1000
+        },
+        {
+          "advertiser": "adv_small_c",
+          "days": 3,
+          "reach": 1100
+        },
+        {
+          "advertiser": "adv_small_c",
+          "days": 7,
+          "reach": 1150
+        },
+        {
+          "advertiser": "adv_small_c",
+          "days": 10,
+          "reach": 1180
+        },
+        {
+          "advertiser": "adv_big",
+          "days": 150,
+          "reach": 480000
+        },
+        {
+          "advertiser": "adv_big",
+          "days": 180,
+          "reach": 490000
+        },
+        {
+          "advertiser": "adv_big",
+          "days": 220,
+          "reach": 500000
+        },
+        {
+          "advertiser": "adv_big",
+          "days": 260,
+          "reach": 510000
+        }
+      ],
+      "expected": {
+        "beta": 0.08556191579601946,
+        "betaMinusOne": -0.9144380842039805,
+        "se": 0.009723748824044037,
+        "ciLow": 0.06313891079808727,
+        "ciHigh": 0.10798492079395165,
+        "tStat": -94.04172205094787,
+        "pValue": 1.8249030010648815e-13,
+        "df": 8,
+        "n": 13,
+        "advertisersUsed": 4,
+        "advertisersDropped": 0,
+        "betaDummyOls": 0.08556191579601512
+      },
+      "naive": {
+        "pooledBeta": 1.6947622930108293,
+        "pearsonR": 0.9729381658595392,
+        "n": 13
+      }
+    }
+  ],
+  "studentTTail": [
+    {
+      "t": 0.0,
+      "df": 1,
+      "p": 1.0
+    },
+    {
+      "t": 0.5,
+      "df": 1,
+      "p": 0.7048327646991335
+    },
+    {
+      "t": 1.0,
+      "df": 1,
+      "p": 0.5000000000000001
+    },
+    {
+      "t": 2.0,
+      "df": 1,
+      "p": 0.2951672353008665
+    },
+    {
+      "t": 3.5,
+      "df": 1,
+      "p": 0.17717106556580953
+    },
+    {
+      "t": 6.0,
+      "df": 1,
+      "p": 0.10513691342250686
+    },
+    {
+      "t": 10.0,
+      "df": 1,
+      "p": 0.06345103486110713
+    },
+    {
+      "t": 0.0,
+      "df": 2,
+      "p": 1.0
+    },
+    {
+      "t": 0.5,
+      "df": 2,
+      "p": 0.6666666666666667
+    },
+    {
+      "t": 1.0,
+      "df": 2,
+      "p": 0.4226497308103742
+    },
+    {
+      "t": 2.0,
+      "df": 2,
+      "p": 0.18350341907227394
+    },
+    {
+      "t": 3.5,
+      "df": 2,
+      "p": 0.07282735005446933
+    },
+    {
+      "t": 6.0,
+      "df": 2,
+      "p": 0.02667147321542477
+    },
+    {
+      "t": 10.0,
+      "df": 2,
+      "p": 0.00985245702332569
+    },
+    {
+      "t": 0.0,
+      "df": 3,
+      "p": 1.0
+    },
+    {
+      "t": 0.5,
+      "df": 3,
+      "p": 0.651447964848151
+    },
+    {
+      "t": 1.0,
+      "df": 3,
+      "p": 0.3910022189557705
+    },
+    {
+      "t": 2.0,
+      "df": 3,
+      "p": 0.13932596855884305
+    },
+    {
+      "t": 3.5,
+      "df": 3,
+      "p": 0.039481037619282774
+    },
+    {
+      "t": 6.0,
+      "df": 3,
+      "p": 0.009272714892284666
+    },
+    {
+      "t": 10.0,
+      "df": 3,
+      "p": 0.0021283990584141503
+    },
+    {
+      "t": 0.0,
+      "df": 5,
+      "p": 1.0
+    },
+    {
+      "t": 0.5,
+      "df": 5,
+      "p": 0.6382988716409291
+    },
+    {
+      "t": 1.0,
+      "df": 5,
+      "p": 0.3632174676491227
+    },
+    {
+      "t": 2.0,
+      "df": 5,
+      "p": 0.10193947882985832
+    },
+    {
+      "t": 3.5,
+      "df": 5,
+      "p": 0.01728443178529335
+    },
+    {
+      "t": 6.0,
+      "df": 5,
+      "p": 0.0018461382895940137
+    },
+    {
+      "t": 10.0,
+      "df": 5,
+      "p": 0.00017094757574296357
+    },
+    {
+      "t": 0.0,
+      "df": 10,
+      "p": 1.0
+    },
+    {
+      "t": 0.5,
+      "df": 10,
+      "p": 0.627893605742973
+    },
+    {
+      "t": 1.0,
+      "df": 10,
+      "p": 0.34089313230206
+    },
+    {
+      "t": 2.0,
+      "df": 10,
+      "p": 0.07338803477074037
+    },
+    {
+      "t": 3.5,
+      "df": 10,
+      "p": 0.0057265054298852106
+    },
+    {
+      "t": 6.0,
+      "df": 10,
+      "p": 0.0001321088603547856
+    },
+    {
+      "t": 10.0,
+      "df": 10,
+      "p": 1.589553175596413e-06
+    },
+    {
+      "t": 0.0,
+      "df": 30,
+      "p": 1.0
+    },
+    {
+      "t": 0.5,
+      "df": 30,
+      "p": 0.6207230048851272
+    },
+    {
+      "t": 1.0,
+      "df": 30,
+      "p": 0.32530861542603
+    },
+    {
+      "t": 2.0,
+      "df": 30,
+      "p": 0.054625044962983094
+    },
+    {
+      "t": 3.5,
+      "df": 30,
+      "p": 0.0014768074376442532
+    },
+    {
+      "t": 6.0,
+      "df": 30,
+      "p": 1.3942768767204766e-06
+    },
+    {
+      "t": 10.0,
+      "df": 30,
+      "p": 4.575251408229619e-11
+    },
+    {
+      "t": 0.0,
+      "df": 50,
+      "p": 1.0
+    },
+    {
+      "t": 0.5,
+      "df": 50,
+      "p": 0.6192685675117714
+    },
+    {
+      "t": 1.0,
+      "df": 50,
+      "p": 0.32212564510024433
+    },
+    {
+      "t": 2.0,
+      "df": 50,
+      "p": 0.05094706873769324
+    },
+    {
+      "t": 3.5,
+      "df": 50,
+      "p": 0.000988085006625621
+    },
+    {
+      "t": 6.0,
+      "df": 50,
+      "p": 2.1889394850799978e-07
+    },
+    {
+      "t": 10.0,
+      "df": 50,
+      "p": 1.6077334688335447e-13
+    },
+    {
+      "t": 0.0,
+      "df": 120,
+      "p": 1.0
+    },
+    {
+      "t": 0.5,
+      "df": 120,
+      "p": 0.6179907243383972
+    },
+    {
+      "t": 1.0,
+      "df": 120,
+      "p": 0.3193227238644212
+    },
+    {
+      "t": 2.0,
+      "df": 120,
+      "p": 0.04775852734032842
+    },
+    {
+      "t": 3.5,
+      "df": 120,
+      "p": 0.0006538077398618765
+    },
+    {
+      "t": 6.0,
+      "df": 120,
+      "p": 2.1483038193060428e-08
+    },
+    {
+      "t": 10.0,
+      "df": 120,
+      "p": 1.7139441175360892e-17
+    },
+    {
+      "t": 0.0,
+      "df": 1000,
+      "p": 1.0
+    },
+    {
+      "t": 0.5,
+      "df": 1000,
+      "p": 0.6171850808338747
+    },
+    {
+      "t": 1.0,
+      "df": 1000,
+      "p": 0.31755241808467227
+    },
+    {
+      "t": 2.0,
+      "df": 1000,
+      "p": 0.04577034649325162
+    },
+    {
+      "t": 3.5,
+      "df": 1000,
+      "p": 0.0004857743459678321
+    },
+    {
+      "t": 6.0,
+      "df": 1000,
+      "p": 2.7553691733774727e-09
+    },
+    {
+      "t": 10.0,
+      "df": 1000,
+      "p": 1.6670702958600126e-22
+    }
+  ],
+  "studentTCritical": [
+    {
+      "alpha": 0.1,
+      "df": 1,
+      "tCritical": 6.313751514675037
+    },
+    {
+      "alpha": 0.05,
+      "df": 1,
+      "tCritical": 12.706204736174694
+    },
+    {
+      "alpha": 0.01,
+      "df": 1,
+      "tCritical": 63.656741162871526
+    },
+    {
+      "alpha": 0.1,
+      "df": 2,
+      "tCritical": 2.9199855803537242
+    },
+    {
+      "alpha": 0.05,
+      "df": 2,
+      "tCritical": 4.302652729749462
+    },
+    {
+      "alpha": 0.01,
+      "df": 2,
+      "tCritical": 9.924843200918287
+    },
+    {
+      "alpha": 0.1,
+      "df": 3,
+      "tCritical": 2.3533634348018233
+    },
+    {
+      "alpha": 0.05,
+      "df": 3,
+      "tCritical": 3.1824463052837078
+    },
+    {
+      "alpha": 0.01,
+      "df": 3,
+      "tCritical": 5.840909309733355
+    },
+    {
+      "alpha": 0.1,
+      "df": 5,
+      "tCritical": 2.015048373333023
+    },
+    {
+      "alpha": 0.05,
+      "df": 5,
+      "tCritical": 2.5705818356363146
+    },
+    {
+      "alpha": 0.01,
+      "df": 5,
+      "tCritical": 4.032142983555227
+    },
+    {
+      "alpha": 0.1,
+      "df": 10,
+      "tCritical": 1.812461122811676
+    },
+    {
+      "alpha": 0.05,
+      "df": 10,
+      "tCritical": 2.228138851986274
+    },
+    {
+      "alpha": 0.01,
+      "df": 10,
+      "tCritical": 3.16927267261695
+    },
+    {
+      "alpha": 0.1,
+      "df": 30,
+      "tCritical": 1.6972608865939571
+    },
+    {
+      "alpha": 0.05,
+      "df": 30,
+      "tCritical": 2.0422724563012378
+    },
+    {
+      "alpha": 0.01,
+      "df": 30,
+      "tCritical": 2.7499956535672254
+    },
+    {
+      "alpha": 0.1,
+      "df": 50,
+      "tCritical": 1.675905025163097
+    },
+    {
+      "alpha": 0.05,
+      "df": 50,
+      "tCritical": 2.0085591121007607
+    },
+    {
+      "alpha": 0.01,
+      "df": 50,
+      "tCritical": 2.677793270940844
+    },
+    {
+      "alpha": 0.1,
+      "df": 120,
+      "tCritical": 1.6576508993552357
+    },
+    {
+      "alpha": 0.05,
+      "df": 120,
+      "tCritical": 1.9799304050824402
+    },
+    {
+      "alpha": 0.01,
+      "df": 120,
+      "tCritical": 2.617421145106866
+    },
+    {
+      "alpha": 0.1,
+      "df": 1000,
+      "tCritical": 1.6463788172854639
+    },
+    {
+      "alpha": 0.05,
+      "df": 1000,
+      "tCritical": 1.9623390808264078
+    },
+    {
+      "alpha": 0.01,
+      "df": 1000,
+      "tCritical": 2.5807546980659506
+    }
   ]
 }
