@@ -49,6 +49,8 @@ interface SurvivalRow {
   last_seen_at: Date
   stopped_at: Date | null
   last_crawl_date: Date
+  first_seen_date: Date
+  stopped_date: Date | null
   end_date: Date
   days_active: number | null
   is_censored: boolean
@@ -259,6 +261,30 @@ describe('creative_survival', () => {
       expect(asDate(row.last_crawl_date)).toBe(day(8))
       expect(row.days_active).toBe(3)
       expect(row.observation_days).toBe(4)
+      // The two dates UC-4's change feed filters on. Pinned here rather than only at the
+      // consumer, because `end_date` coincides with `stopped_date` for every dead creative
+      // and a consumer test could not tell which of the two it was actually reading.
+      expect(asDate(row.first_seen_date)).toBe(day(1))
+      expect(asDate(row.stopped_date!)).toBe(day(4))
+    })
+
+    it('exposes a null stopped_date for a censored creative, not its last crawl', async () => {
+      // `end_date` falls back to the last crawl when nothing died; `stopped_date` must not.
+      // A change feed reading "detenidos" off `end_date` would report every living creative
+      // as stopped on the day of the most recent crawl — every one of them, every day.
+      const creativeId = await panel({
+        days: [
+          { day: 1, present: true },
+          { day: 2, present: true },
+          { day: 3, present: true },
+        ],
+      })
+
+      const row = (await survival(creativeId))!
+      expect(row.is_censored).toBe(true)
+      expect(row.stopped_date).toBeNull()
+      expect(asDate(row.end_date)).toBe(day(3))
+      expect(asDate(row.first_seen_date)).toBe(day(1))
     })
 
     it('marks a creative still running at the last look as censored', async () => {

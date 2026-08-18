@@ -142,6 +142,7 @@ spans as (
          p.last_seen_at,
          p.first_seen_date,
          s.stopped_at,
+         s.stopped_date,
          l.last_crawl_date,
          coalesce(s.stopped_date, l.last_crawl_date) as end_date
   from presence p
@@ -203,6 +204,15 @@ select cr.id                as creative_id,
        sp.last_seen_at,
        sp.stopped_at,
        sp.last_crawl_date,
+
+       -- The instants above are for display; these dates are what any consumer must filter
+       -- on. Exposed because the alternative is worse: a consumer asking "what did we first
+       -- see last week" would otherwise cast `first_seen_at`, and a cast in the session zone
+       -- is the timezone bug this whole view exists to avoid. Handing back the `run_date`
+       -- these were derived from removes the temptation and the drift — UC-4's change feed
+       -- filters on exactly the days this view measured, not on a re-derivation of them.
+       sp.first_seen_date,
+       sp.stopped_date,
 
        -- The right edge of the measurement: the death day, or the last day we looked. Exposed
        -- so `days_active` can be audited without re-deriving it.

@@ -104,6 +104,22 @@
   by `packages/db/test/worker-sql.test.ts`. That is the only thing checking the Python worker's
   columns against the real schema — PGlite cannot be imported from Python, and a renamed column
   is otherwise invisible until it runs in production against data that cannot be re-crawled.
+- **Shape every value in SQL, because PGlite and node-postgres decode three types
+  differently — and PGlite is the one that is right.** Measured, not assumed:
+
+  | Postgres type | PGlite (tests) | node-postgres (production) |
+  |---|---|---|
+  | `date` | `Date` at **UTC** midnight | `Date` at **local** midnight |
+  | `bigint` / `count(*)` | `number` | **`string`** |
+  | `numeric` | `string` | `string` |
+
+  The `date` row is the dangerous one. `TZ=Pacific/Kiritimati` turns `2026-03-01` into
+  `2026-02-28T10:00:00Z`, so `d.toISOString().slice(0, 10)` reads back the *previous day* —
+  which is UC-3's timezone bug again, one layer below the SQL, in a place no test can reach
+  because the test driver decodes it correctly. A suite can be green in every timezone and
+  still ship a panel that is a day out on any server not running UTC. So: **`to_char(d,
+  'YYYY-MM-DD')` for every date, `::int` for every count, `::float8` for every numeric.** A
+  value that crosses the driver boundary already shaped cannot be decoded two ways.
 
 ## Panel guardrails (the failure modes that corrupt the outcome variable)
 
