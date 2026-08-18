@@ -150,6 +150,21 @@ describe('row-level security', () => {
   })
 
   describe('append-only audit', () => {
+    /**
+     * The two tests immediately below are honestly labelled: they are close to vacuous under
+     * PGlite and only mean something against a real Supabase project.
+     *
+     * 0001 revokes UPDATE and DELETE from every client role, and in production that revoke is
+     * the real defence — Supabase's bootstrap grants those privileges by default on a new
+     * table, so the revoke is what takes them away. PGlite has no such bootstrap: the
+     * privileges were never granted, the revoke is a no-op, and "permission denied" is what
+     * happens with or without the revoke line in the migration. Measured, not assumed, while
+     * building 0007: deleting the equivalent revokes from that file left the suite green.
+     *
+     * They are kept because they are the production behaviour. What proves the guarantee is
+     * the trigger test after them, which goes the other way — grant the privileges back, as
+     * hostile as production's defaults, and show the write fails anyway.
+     */
     it('denies update to every client role', async () => {
       await expect(
         asAuthenticated(db, { sub: USER_A, org_id: ORG_A }, (tx) =>
@@ -164,6 +179,45 @@ describe('row-level security', () => {
           tx.query('delete from public.audit_events'),
         ),
       ).rejects.toThrow(/permission denied/i)
+    })
+
+    it('refuses an update and a delete even when the privilege has been granted back', async () => {
+      // Privileged throughout: this is the writer the audit log actually has. Every event is
+      // appended by a background job through the service role, which is exactly the role a
+      // revoke stops protecting the moment someone re-grants it. The trigger from 0008 does
+      // not consult grants at all, so it holds for that role, for the table owner, and for
+      // whoever is in psql at 2am.
+      await db.exec('reset role')
+      const [seeded] = await db.query<{ id: string }>(
+        `insert into public.audit_events (workspace_id, trace_id, actor, type)
+         values ($1, 'trc_append_only', $2, 'test.append_only') returning id`,
+        [workspaceA, JSON.stringify({ type: 'operator', id: 'seed' })],
+      )
+      await db.exec('grant update, delete on public.audit_events to authenticated, service_role')
+
+      try {
+        await expect(
+          db.query(`update public.audit_events set type = 'tampered' where id = $1`, [seeded!.id]),
+        ).rejects.toThrow(/append-only/)
+
+        await expect(
+          db.query('delete from public.audit_events where id = $1', [seeded!.id]),
+        ).rejects.toThrow(/append-only/)
+
+        // The row is still there, still saying what it said.
+        const rows = await db.query<{ type: string }>(
+          'select type from public.audit_events where id = $1',
+          [seeded!.id],
+        )
+        expect(rows.map((r) => r.type)).toEqual(['test.append_only'])
+      } finally {
+        // Restore the migration's posture, or the two tests above stop meaning anything for
+        // whoever adds a case after this one.
+        await db.exec('reset role')
+        await db.exec(
+          'revoke update, delete on public.audit_events from authenticated, service_role',
+        )
+      }
     })
   })
 
