@@ -1,14 +1,15 @@
 [project]
 name = "mini-crux-extractor"
-version = "0.3.0"
+version = "0.3.1"
 description = "Structural video feature extraction for Mini Crux creatives."
 requires-python = ">=3.12"
 
 # Split deliberately. `opencv-python-headless` and numpy are cheap (~50MB) and carry the
 # geometry half of the feature set, so they are core: a worker without them cannot do its
-# job at all. The model half — easyocr and faster-whisper pull torch, ~2GB — sits in the
-# `ml` extra and is imported lazily, so a worker missing it still extracts duration and
-# cuts and records the rest as skipped (see backends.BackendUnavailable).
+# job at all. The model half — easyocr and faster-whisper pull torch, a few hundred MB once
+# it is the CPU build — sits in the `ml` extra and is imported lazily, so a worker missing
+# it still extracts duration and cuts and records the rest as skipped (see
+# backends.BackendUnavailable).
 #
 # The consequence is stated plainly in specs/UC-2: CI installs core + dev only, so it
 # proves the *pipeline* — sampling, degradation, idempotency, versioning — and not the
@@ -26,11 +27,37 @@ ml = [
     "easyocr>=1.7.2",
     "faster-whisper>=1.1.0",
     "librosa>=0.10.2",
+    # torch and torchvision are easyocr's dependencies, not ours — they are named here only
+    # so `[tool.uv.sources]` below can reach them. uv applies a source to a package the
+    # project depends on directly; a transitive one resolves from PyPI whatever we say.
+    "torch>=2.0",
+    "torchvision>=0.15",
 ]
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
 ]
+
+# ── torch, without the GPU it will never have ────────────────────────────────
+#
+# PyPI's linux torch is the CUDA build: it drags in cuBLAS, cuDNN, NCCL, Triton and the rest
+# of the nvidia stack — 2.7GB of compressed wheels, of which ~2.2GB is GPU code. This worker
+# runs on Fly `shared-cpu-2x` with 2GB of RAM and no GPU, so not one byte of that can ever
+# execute. It is not merely waste: unpacked and installed twice by the two-stage Dockerfile,
+# it exceeds a GitHub runner's disk, which is how the extractor image build died in CI with
+# no log at all — the runner was killed rather than the build failing.
+#
+# The CPU index carries the same torch without the CUDA payload. Scoped to Linux by marker
+# because that index publishes no macOS wheels, and PyPI's macOS torch is already CPU-only —
+# so a developer on a Mac resolves exactly what they resolve today.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [build-system]
 requires = ["hatchling"]

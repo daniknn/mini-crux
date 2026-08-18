@@ -39,7 +39,7 @@ WORKDIR /app
 
 # ── dependencies ─────────────────────────────────────────────────────────────
 # Lockfile and manifest first so a source edit does not re-resolve — which here means not
-# re-downloading torch, roughly 2GB of the image.
+# re-downloading torch, still the largest thing in the image even as the CPU build.
 FROM base AS deps
 
 COPY pyproject.toml uv.lock ./

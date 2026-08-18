@@ -155,40 +155,43 @@ short-lived Vercel functions that would race each other on the same tracking tab
 
 ### Worker
 
-- [ ] Claims a `crawl` job, runs it, and leaves `jobs.status = 'succeeded'`
-- [ ] A successful `crawl` enqueues exactly one `parse` job with the **same `trace_id`**
-- [ ] Claims `parse` and `analysis` and dispatches each to its handler
-- [ ] A job whose type has no handler ends `failed` with `last_error` naming the type
-- [ ] A handler that throws leaves the job `pending` with `attempts` incremented, until
+- [x] Claims a `crawl` job, runs it, and leaves `jobs.status = 'succeeded'`
+- [x] A successful `crawl` enqueues exactly one `parse` job with the **same `trace_id`**
+- [x] Claims `parse` and `analysis` and dispatches each to its handler
+- [x] A job whose type has no handler ends `failed` with `last_error` naming the type
+- [x] A handler that throws leaves the job `pending` with `attempts` incremented, until
       `max_attempts`, then `failed`
-- [ ] Heartbeat continues during a handler that blocks for longer than the stall window
-- [ ] A redelivered `message_id` does not run the side effect twice
-- [ ] Claims nothing belonging to another runtime — a pending `extract` job is left alone
+- [x] Heartbeat continues during a handler that blocks for longer than the stall window
+- [x] A redelivered `message_id` does not run the side effect twice
+- [x] Claims nothing belonging to another runtime — a pending `extract` job is left alone
 
 ### Schedule
 
-- [ ] `app.enqueue_daily_analysis()` enqueues one job for a workspace with a healthy crawl today
-- [ ] It enqueues nothing when today's crawl failed
-- [ ] It enqueues nothing when an `analysis_runs` row already exists for that panel date
-- [ ] It enqueues nothing on a second call the same day
-- [ ] Both new cron entries register on a database with `pg_cron`, and the migration still
+- [x] `app.enqueue_daily_analysis()` enqueues one job for a workspace with a healthy crawl today
+- [x] It enqueues nothing when today's crawl failed
+- [x] It enqueues nothing when an `analysis_runs` row already exists for that panel date
+- [x] It enqueues nothing on a second call the same day
+- [x] Both new cron entries register on a database with `pg_cron`, and the migration still
       applies on PGlite without it
 
 ### Health
 
-- [ ] `200` when every active watchlist has a `succeeded` crawl for today's market date
-- [ ] `503` naming the watchlist when one is missing entirely
-- [ ] `503` distinguishing `failed` from `never started`
-- [ ] Inactive watchlists are ignored
-- [ ] The market date is used, not UTC — a run at 23:00 UTC still reads as the same market day
-- [ ] Wrong or missing shared secret → `401`, and the body reveals nothing
+- [x] `200` when every active watchlist has a `succeeded` crawl for today's market date
+- [x] `503` naming the watchlist when one is missing entirely
+- [x] `503` distinguishing `failed` from `never started`
+- [x] Inactive watchlists are ignored
+- [x] The market date is used, not UTC — a run at 23:00 UTC still reads as the same market day
+- [x] Wrong or missing shared secret → `401`, and the body reveals nothing
 
 ### Deploy
 
 - [ ] `apps/extractor` image builds in CI
-- [ ] The TS worker image builds in CI
-- [ ] Migrations run once as the worker's release command against an empty database
-- [ ] `RUNBOOK.md` covers: first deploy, a missed day, a stuck job, a failed migration,
+- [x] The TS worker image builds in CI — and its first run caught a real defect: `--prod`
+      creates no `node_modules` for a package whose dependencies are all dev-only
+- [ ] Migrations run once as the worker's release command against an empty database —
+      configured and reviewed, never executed. No database exists yet, so this is the one
+      criterion here that only the owner's first deploy can close
+- [x] `RUNBOOK.md` covers: first deploy, a missed day, a stuck job, a failed migration,
       rotating a secret
 
 ## Test plan
