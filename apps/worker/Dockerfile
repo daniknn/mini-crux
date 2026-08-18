@@ -53,14 +53,14 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-COPY --from=deps /app/node_modules                     ./node_modules
-COPY --from=deps /app/packages/core/node_modules       ./packages/core/node_modules
-COPY --from=deps /app/packages/db/node_modules         ./packages/db/node_modules
-COPY --from=deps /app/packages/analysis/node_modules   ./packages/analysis/node_modules
-COPY --from=deps /app/packages/ingestion/node_modules  ./packages/ingestion/node_modules
-COPY --from=deps /app/apps/worker/node_modules         ./apps/worker/node_modules
+# The whole deps stage, not a list of `node_modules` paths one per package. That list was
+# wrong: `@mini-crux/analysis` declares only devDependencies, so under `--prod` pnpm creates
+# no `node_modules` for it at all and the COPY failed the build with "not found". Any package
+# whose entire dependency set is dev-only lands in the same hole, so the enumeration is a
+# standing trap rather than a one-time mistake. The deps stage holds nothing but manifests,
+# the lockfile and the installed trees — copying it whole is exact and cannot go stale.
+COPY --from=deps /app ./
 
-COPY package.json pnpm-workspace.yaml ./
 COPY packages/core      packages/core
 COPY packages/db        packages/db
 COPY packages/analysis  packages/analysis
