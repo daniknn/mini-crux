@@ -70,8 +70,16 @@ comment on view public.ingestion_health is
   'One row per active watchlist with today''s market-date crawl state. `never-started` is a '
   'state, not an absence — that distinction is the entire alarm.';
 
--- Supabase''s bootstrap grants this by default; PGlite has no bootstrap, so the grant has to
--- be explicit or every test that reads the view as `authenticated` fails on privileges rather
--- than on policy. `service_role` needs no grant: it is BYPASSRLS and holds the table rights
--- already.
-grant select on public.ingestion_health to authenticated;
+-- Supabase's bootstrap grants both of these by default; PGlite has no bootstrap, so the grant
+-- has to be explicit or every test that reads the view as `authenticated` fails on privileges
+-- rather than on policy.
+--
+-- `service_role` is granted explicitly too, and the reason is worth stating because it is easy
+-- to talk yourself out of: BYPASSRLS is not a table privilege. It exempts the role from row
+-- security and does nothing about `select` rights, which service_role holds only through
+-- Supabase's `alter default privileges … to service_role` — the same bootstrap this repo has
+-- twice been caught leaning on (CLAUDE.md, on revokes). If that default is ever absent, or the
+-- migration is applied by some role other than the one it covers, the health endpoint's read
+-- fails on privileges and the alarm answers 503 `unknown`: an operator paged to a database
+-- outage that is really a missing grant. One line removes the dependency entirely.
+grant select on public.ingestion_health to authenticated, service_role;
