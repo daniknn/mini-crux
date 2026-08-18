@@ -1,7 +1,7 @@
 {
   "name": "mini-crux",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "packageManager": "pnpm@11.8.0",
   "engines": {
     "node": ">=24"

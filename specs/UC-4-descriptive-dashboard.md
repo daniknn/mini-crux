@@ -86,9 +86,21 @@ So UC-4 adds a poster step to the UC-2 extractor: decode one keyframe, write a J
 Storage, record `poster_storage_path` on `creative_features`. The web app serves it through a
 short-lived signed URL minted server-side.
 
-The frame is taken at **`first_cut_time_s / 2`, falling back to 1.0s**, not at t=0 — the first
-frame of an ad is frequently black or a platform chrome card, and a gallery of black squares
-is a gallery of nothing.
+The frame is taken at **`max(first_cut_time_s / 2, 1.0s)`**, not at t=0 — the first frame of an
+ad is frequently black or a platform chrome card, and a gallery of black squares is a gallery
+of nothing. A video with no cut to halve uses the same 1.0s.
+
+The 1.0s is a **floor, not just a fallback**, and the difference matters for exactly the
+creatives the rule exists to protect. Meta's re-encodes routinely open with a fraction of a
+second of black; that black-to-content transition is itself detected as the first cut, so
+`first_cut_time_s` is small and a literal halving puts the poster back *inside* the black. The
+floor is what keeps it out. (Implemented in `_poster_target_s`; pinned by
+`test_an_early_first_cut_falls_back_instead_of_landing_back_in_the_lead_in`, which uses a
+ramp-brightness fixture because against flat scenes t=0, the halving and the fallback all
+produce the same image and the test would prove nothing.)
+
+The poster key carries the schema version (`….poster.v{n}.jpg`). Storage is write-once, so a
+version-less key would make a re-extraction silently keep the *previous* definition's frame.
 
 Poster extraction is **best-effort and never fails the job.** A creative with no poster
 renders a text card. This follows UC-2's degradation rule: a missing poster is a missing
@@ -147,10 +159,15 @@ measurement that is absent. UC-5 still excludes, and says so.
 
 **Poster frames**
 
-- [ ] A creative whose media decodes gets a `poster_storage_path` and renders an image
-- [ ] A creative whose poster extraction fails still gets its feature row, lands in
-      `skipped_features`, and renders a text card
+- [x] A creative whose media decodes gets a `poster_storage_path` and renders an image
+      *(extractor side proven; gallery rendering still open)*
+- [x] A creative whose poster extraction fails still gets its feature row and lands in
+      `skipped_features` *(text card still open)*
+- [x] A poster whose **upload** fails leaves `poster_storage_path` null, never a path
+      pointing at an object that was never written
+- [x] The poster is cut at the floored timestamp, not at t=0 and not at a bare halving
 - [ ] The poster URL handed to the browser is short-lived and minted server-side
+- [ ] A creative with no poster renders a text card in the gallery
 
 **Watchlists**
 

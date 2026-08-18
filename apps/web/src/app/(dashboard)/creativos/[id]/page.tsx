@@ -2,6 +2,7 @@ import { getCreativeDetail, type CreativeDetail } from '@mini-crux/db/dashboard'
 import { notFound } from 'next/navigation'
 
 import { Duration } from '../../../../components/duration.tsx'
+import { Poster } from '../../../../components/poster.tsx'
 import { Badge } from '../../../../components/ui/badge.tsx'
 import {
   Card,
@@ -12,6 +13,7 @@ import {
 } from '../../../../components/ui/card.tsx'
 import { dateLabel, metricLabel } from '../../../../lib/format.ts'
 import { withWorkspace } from '../../../../server/db.ts'
+import { signPosterUrl } from '../../../../server/posters.ts'
 
 /**
  * One creative: its measurements, its message, and the day-by-day record behind its duration.
@@ -38,20 +40,32 @@ export default async function CreativeDetailPage({
   // indistinguishable to a caller probing for ids.
   if (creative === null) notFound()
 
+  // Signed only after the 404 above. Doing it before would sign a path for a creative the
+  // caller is not allowed to know exists.
+  const posterUrl = await signPosterUrl(creative.posterStoragePath)
+
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex flex-col gap-2">
-        <p className="text-sm text-muted-foreground">{creative.advertiserName}</p>
-        <h1 className="font-display text-2xl">
-          {creative.firstLineTranscript ?? creative.adCopy ?? 'Creativo sin copia registrada'}
-        </h1>
-        <Duration
-          daysActive={creative.daysActive}
-          isCensored={creative.isCensored}
-          hasGaps={creative.hasGaps}
-          observationDays={creative.observationDays}
-          withVerb
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        <Poster
+          src={posterUrl}
+          advertiserName={creative.advertiserName}
+          mediaType={creative.mediaType}
+          className="w-full sm:w-40 sm:shrink-0"
         />
+        <div className="flex flex-col gap-2">
+          <p className="text-sm text-muted-foreground">{creative.advertiserName}</p>
+          <h1 className="font-display text-2xl">
+            {creative.firstLineTranscript ?? creative.adCopy ?? 'Creativo sin copia registrada'}
+          </h1>
+          <Duration
+            daysActive={creative.daysActive}
+            isCensored={creative.isCensored}
+            hasGaps={creative.hasGaps}
+            observationDays={creative.observationDays}
+            withVerb
+          />
+        </div>
       </header>
 
       <div className="grid gap-4 lg:grid-cols-3">

@@ -9,11 +9,13 @@ import Link from 'next/link'
 import { Duration } from '../../../components/duration.tsx'
 import { EmptyState } from '../../../components/empty-state.tsx'
 import { PanelCaveat } from '../../../components/panel-caveat.tsx'
+import { Poster } from '../../../components/poster.tsx'
 import { Badge } from '../../../components/ui/badge.tsx'
 import { Card, CardContent } from '../../../components/ui/card.tsx'
 import { cn } from '../../../lib/utils.ts'
 import { metricLabel } from '../../../lib/format.ts'
 import { withWorkspace } from '../../../server/db.ts'
+import { signPosterUrls } from '../../../server/posters.ts'
 
 /**
  * The creative gallery.
@@ -68,6 +70,10 @@ export default async function GalleryPage({
       ...(advertiserId === undefined ? {} : { advertiserId }),
     }),
   }))
+
+  // Signed after the query, in one batch, and only for the rows RLS actually returned.
+  // Nothing here reads a path from `searchParams` — the browser never names an object.
+  const posters = await signPosterUrls(creatives.map((c) => c.posterStoragePath))
 
   const query = (next: Partial<Search>): string => {
     const merged = { anunciante: advertiserId, estado: status, orden: sort, ...next }
@@ -136,6 +142,16 @@ export default async function GalleryPage({
             <li key={c.creativeId}>
               <Card className="h-full transition-colors duration-fast ease-brew hover:border-primary/50">
                 <Link href={`/creativos/${c.creativeId}`} className="flex h-full flex-col">
+                  <Poster
+                    src={
+                      c.posterStoragePath === null
+                        ? null
+                        : (posters.get(c.posterStoragePath) ?? null)
+                    }
+                    advertiserName={c.advertiserName}
+                    mediaType={c.mediaType}
+                    className="rounded-b-none"
+                  />
                   <CardContent className="flex flex-1 flex-col gap-3 p-5">
                     <div className="flex items-start justify-between gap-2">
                       <span className="font-medium text-foreground">{c.advertiserName}</span>

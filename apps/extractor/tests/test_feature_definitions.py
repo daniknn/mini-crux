@@ -24,8 +24,8 @@ from extractor.features import (
 )
 
 # Bump FEATURE_SCHEMA_VERSION and update this digest together, in the same commit.
-EXPECTED_DIGEST = "3507d14e9fdd63c7"
-EXPECTED_VERSION = 1
+EXPECTED_DIGEST = "f51e4b1920e90ef6"
+EXPECTED_VERSION = 2
 
 
 def test_definitions_are_pinned_to_the_schema_version() -> None:

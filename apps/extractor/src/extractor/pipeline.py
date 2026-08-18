@@ -32,9 +32,10 @@ from .backends import (
 from .features import (
     FEATURE_SCHEMA_VERSION,
     HOOK_WINDOW_S,
+    POSTER_FALLBACK_S,
     CreativeFeatures,
 )
-from .video import UnreadableMedia, analyze, read_image
+from .video import UnreadableMedia, analyze, encode_poster, nearest_frame, read_image
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +105,31 @@ def _extract_video(
         ("audio_energy_variance",),
         lambda: _run_audio(features, media_path, audio),
     )
+    _guard(
+        features,
+        ("poster_storage_path",),
+        lambda: _run_poster(features, analysis.ocr_frames, _poster_target_s(features)),
+    )
 
     return features
+
+
+def _poster_target_s(features: CreativeFeatures) -> float:
+    """Where to cut the poster: half the time to the first cut, else `POSTER_FALLBACK_S`.
+
+    Halving the first cut lands inside the opening shot, which is the shot the advertiser
+    composed as the ad's face. Cutting *at* the cut would land on the transition frame, and
+    cutting at t=0 lands on the black or chrome frame Ad Library re-encodes so often begin
+    with — which is the whole reason this is not just `frames[0]`.
+
+    A single-shot video has no cut to halve, so it falls back; so does a video whose only
+    cut is so early that half of it is back in the black frame we were avoiding.
+    """
+    first_cut = features.first_cut_time_s
+    if first_cut is None:
+        return POSTER_FALLBACK_S
+    halved = first_cut / 2
+    return halved if halved >= POSTER_FALLBACK_S else POSTER_FALLBACK_S
 
 
 def _extract_image(
@@ -133,6 +157,9 @@ def _extract_image(
         ("text_in_first_2s", "text_density"),
         lambda: _run_ocr(features, [(0.0, frame)], ocr),
     )
+    # A still is its own poster. Re-encoded rather than pointed at, so the gallery renders
+    # one predictable size and format instead of whatever the advertiser uploaded.
+    _guard(features, ("poster_storage_path",), lambda: _run_poster(features, [(0.0, frame)], 0.0))
     return features
 
 
@@ -196,6 +223,20 @@ def _run_transcript(
 
     features.first_line_transcript = transcript.first_line
     features.full_transcript = transcript.full_text
+
+
+def _run_poster(
+    features: CreativeFeatures,
+    frames: list[tuple[float, object]],
+    target_s: float,
+) -> None:
+    """Encode the poster. Sets only the bytes — the worker sets the path after uploading.
+
+    Raising here is the intended failure mode, not an escape hatch: `_guard` turns it into
+    `poster_storage_path` in `skipped_features`, which is what tells the gallery to render a
+    text card rather than an image element pointed at nothing.
+    """
+    features.poster_jpeg = encode_poster(nearest_frame(list(frames), target_s)[1])
 
 
 def _run_audio(
