@@ -75,6 +75,17 @@
 - **RLS denies any command that has no permissive policy for it, regardless of grants.** A
   `grant insert` with only a `for select` policy is dead code. If a client role is granted a
   command, that command needs its own policy — see `audit_events_tenant_append` in `0001`.
+- **A `revoke` is not a testable guarantee under PGlite — append-only needs a trigger.**
+  Supabase's bootstrap runs `alter default privileges … grant all on tables to anon,
+  authenticated, service_role`, so a new table arrives with UPDATE and DELETE granted and the
+  revoke is what removes them. PGlite has no bootstrap: the privileges were never granted, the
+  revoke is a no-op, and a test asserting "permission denied" or "no update grant exists"
+  passes with the revoke line **deleted**. Measured twice — on `analysis_runs` (0007) and on
+  `audit_events` (0008), where removing the trigger let a privileged `update` silently rewrite
+  an audit row while both existing "denies update/delete" tests stayed green. So: keep the
+  revokes (refusing the privilege beats erroring on the attempt) **and** attach
+  `app.reject_mutation()` as a `before update or delete` trigger, which ignores grants
+  entirely. Test it by granting the privileges back and proving the write still fails.
 - **Never run a tenancy assertion on the default PGlite connection.** It is a superuser, and
   superusers bypass RLS even with `FORCE ROW LEVEL SECURITY`. Always go through
   `asAuthenticated` (`packages/db/src/testing.ts`).
