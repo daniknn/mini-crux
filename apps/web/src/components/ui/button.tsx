@@ -27,10 +27,10 @@ const buttonVariants = cva(
         ghost: 'bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
       },
       size: {
-        // 44px minimum touch target.
+        // Both are 44px. There is deliberately no smaller size: a "compact" variant is how
+        // the touch-target minimum gets lost, one reasonable-looking exception at a time.
+        // Smaller *text* is fine and is what `text-xs` on the caller is for.
         default: 'h-11 px-5 text-sm',
-        // Only for controls inside a row that already has a 44px target, never standalone.
-        compact: 'h-9 px-3 text-xs',
         icon: 'h-11 w-11',
       },
     },
