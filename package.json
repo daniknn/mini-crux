@@ -12,7 +12,8 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "check:rls": "node scripts/check-rls-policies.mjs"
+    "check:rls": "node scripts/check-rls-policies.mjs",
+    "crawl:once": "pnpm --filter @mini-crux/ingestion crawl:once"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
