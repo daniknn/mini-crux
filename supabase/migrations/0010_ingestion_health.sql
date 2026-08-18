@@ -41,7 +41,14 @@ select
   -- The market's calendar day, never the reader's. A monitor in Frankfurt and an operator in
   -- Mexico City must agree on which day is "today", or the alarm fires for six hours every
   -- night on a panel that is perfectly healthy. See `app.market_date` in 0009.
-  app.market_date()                 as market_date,
+  --
+  -- Emitted as `text`, not as `date`, and that is not a detail. Every driver invents its own
+  -- instant for a bare `date`: node-postgres builds a `Date` at the *reader's* local
+  -- midnight, PGlite builds one at UTC midnight, PostgREST sends a plain string. Read the
+  -- first two back with the wrong assumption and the day shifts by one — which is exactly
+  -- the failure this column exists to prevent, arriving through the client library instead
+  -- of through the SQL. A day with no instant cannot be shifted by anybody.
+  app.market_date()::text           as market_date,
   -- The whole point of the view. `left join` + `coalesce` turns the absence of a row into a
   -- state, so "we never looked" is a value an alarm can read rather than an empty result an
   -- alarm silently agrees with.

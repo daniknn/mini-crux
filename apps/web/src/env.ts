@@ -28,11 +28,17 @@ export function serverEnv(): {
   supabaseUrl: string
   supabaseServiceRoleKey: string
   databaseUrl: string
+  healthCheckToken: string
 } {
   return {
     clerkSecretKey: required('CLERK_SECRET_KEY'),
     supabaseUrl: required('SUPABASE_URL'),
     supabaseServiceRoleKey: required('SUPABASE_SERVICE_ROLE_KEY'),
+    // The ingestion alarm's only credential. It is a shared secret rather than a Clerk
+    // session because an uptime checker cannot hold one, and `required` rather than
+    // optional-with-a-default because the failure mode of a default is an open endpoint
+    // that nobody notices is open.
+    healthCheckToken: required('HEALTH_CHECK_TOKEN'),
     // Deliberately NOT `SUPABASE_DB_URL`. That one is the migration runner's connection:
     // a direct session as `postgres`, which is BYPASSRLS because it has to create policies.
     // Pointing the dashboard at it would disable every tenancy guarantee in the product

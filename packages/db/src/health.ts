@@ -117,8 +117,64 @@ export interface SummarizeOptions {
 
 const ONE_HOUR_MS = 60 * 60 * 1000
 
+/** The view's own column names, before anything has decided what they mean. */
+interface RawIngestionHealthRow {
+  workspace_id: string
+  watchlist_id: string
+  label: string
+  query: string
+  country: string
+  /** `text` by construction — see the note on the column in migration 0010. */
+  market_date: string
+  state: IngestionState
+  crawl_run_id: string | null
+  attempt: number | string | null
+  error: string | null
+  started_at: string | Date | null
+  finished_at: string | Date | null
+}
+
 /**
- * Read one row per active watchlist for today's market date.
+ * The single place the view's columns are named.
+ *
+ * There are two transports — a Postgres connection and PostgREST — and this exists so there
+ * are not two column lists. Both readers below `select *` and hand the rows here, so adding
+ * a column to migration 0010 is one edit, not three that must agree.
+ *
+ * It also absorbs the decoding divergence, which is not cosmetic: `pg` returns `timestamptz`
+ * as a `Date`, PostgREST returns it as an ISO string, and PGlite has its own opinions again.
+ * A summarizer that did `row.startedAt.getTime()` on a string would throw in production
+ * while passing every test written against the driver the test happened to use.
+ */
+function mapIngestionHealthRow(raw: RawIngestionHealthRow): IngestionHealthRow {
+  return {
+    workspaceId: raw.workspace_id,
+    watchlistId: raw.watchlist_id,
+    label: raw.label,
+    query: raw.query,
+    country: raw.country,
+    // Passed through untouched. The view already emits `text` precisely so that no driver
+    // and no line of code here gets the chance to give this day an instant.
+    marketDate: raw.market_date,
+    state: raw.state,
+    crawlRunId: raw.crawl_run_id,
+    attempt: raw.attempt === null ? null : Number(raw.attempt),
+    error: raw.error,
+    startedAt: toDate(raw.started_at),
+    finishedAt: toDate(raw.finished_at),
+  }
+}
+
+function toDate(value: string | Date | null): Date | null {
+  if (value === null) return null
+  return value instanceof Date ? value : new Date(value)
+}
+
+/** Stable order so two readings of an unchanged instance produce an unchanged response. */
+const ORDER_BY = 'label, watchlist_id'
+
+/**
+ * Read one row per active watchlist for today's market date, over a Postgres connection.
  *
  * No workspace filter and no date parameter, both on purpose. The date comes from
  * `app.market_date()` inside the view so the market's calendar day has exactly one
@@ -127,22 +183,59 @@ const ONE_HOUR_MS = 60 * 60 * 1000
  * instance-wide check rather than a bug.
  */
 export async function getIngestionHealth(db: SqlExecutor): Promise<IngestionHealthRow[]> {
-  return await db.query<IngestionHealthRow>(
-    `select workspace_id   as "workspaceId",
-            watchlist_id   as "watchlistId",
-            label,
-            query,
-            country,
-            market_date::text as "marketDate",
-            state,
-            crawl_run_id   as "crawlRunId",
-            attempt,
-            error,
-            started_at     as "startedAt",
-            finished_at    as "finishedAt"
-     from public.ingestion_health
-     order by label, watchlist_id`,
+  const rows = await db.query<RawIngestionHealthRow>(
+    `select * from public.ingestion_health order by ${ORDER_BY}`,
   )
+  return rows.map(mapIngestionHealthRow)
+}
+
+export interface RestCredentials {
+  supabaseUrl: string
+  /** MUST be the service-role key: the uptime check is an instance-wide question. */
+  serviceRoleKey: string
+  /** Injected in tests. Defaults to the global `fetch`. */
+  fetchImpl?: typeof fetch
+}
+
+/**
+ * The same read over PostgREST, for a caller that has no Postgres connection.
+ *
+ * The web app is exactly that caller. Its only pool authenticates as `authenticator` and
+ * exists to run `withTenant`, and pointing it at a BYPASSRLS connection string — or teaching
+ * it to `set role service_role` — would put a "see every workspace" primitive inside the
+ * process whose entire job is to never do that. The service-role key stays what it already
+ * is here: a server-only credential used by `fetch`, exactly as `posters.ts` uses it.
+ *
+ * PostgREST reaches the view because `service_role` is BYPASSRLS; the view being
+ * `security_invoker` is what makes that mean "every workspace" rather than "whatever the
+ * view's owner could see".
+ */
+export async function fetchIngestionHealth(
+  credentials: RestCredentials,
+): Promise<IngestionHealthRow[]> {
+  const doFetch = credentials.fetchImpl ?? fetch
+  const url = `${credentials.supabaseUrl.replace(/\/$/, '')}/rest/v1/ingestion_health`
+    + `?select=*&order=${encodeURIComponent(ORDER_BY.replace(/\s/g, ''))}`
+
+  const response = await doFetch(url, {
+    headers: {
+      apikey: credentials.serviceRoleKey,
+      authorization: `Bearer ${credentials.serviceRoleKey}`,
+      accept: 'application/json',
+    },
+    // The alarm must never be the thing that hangs. An uptime checker that times out reports
+    // the same red as a real outage, but with none of the detail that tells them apart.
+    signal: AbortSignal.timeout(10_000),
+  })
+
+  if (!response.ok) {
+    throw new Error(
+      `ingestion_health read failed: ${response.status} ${response.statusText}`,
+    )
+  }
+
+  const body = (await response.json()) as RawIngestionHealthRow[]
+  return body.map(mapIngestionHealthRow)
 }
 
 /**

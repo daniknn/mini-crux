@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  fetchIngestionHealth,
   getIngestionHealth,
   summarizeIngestionHealth,
   type IngestionHealthRow,
@@ -103,6 +104,9 @@ describe('public.ingestion_health (the view)', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ label: 'Fintech MX', state: 'succeeded', attempt: 2 })
     expect(rows[0]!.crawlRunId).not.toBeNull()
+    // A plain day with no instant attached. If this ever comes back as a `Date`, some
+    // driver is free to render it a day out — see the column's note in migration 0010.
+    expect(rows[0]!.marketDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 
   it('turns a missing crawl into a `never-started` row rather than no row', async () => {
@@ -243,6 +247,103 @@ describe('public.ingestion_health (the view)', () => {
       (db) => getIngestionHealth(db),
     )
     expect(asOperator.map((r) => r.label)).toEqual(['Mine'])
+  })
+})
+
+describe('fetchIngestionHealth (the PostgREST transport)', () => {
+  let fixture: Fixture
+
+  beforeEach(async () => {
+    const db = await createTestDb()
+    const { workspaceId } = await seedWorkspace(db, {
+      slug: 'acme',
+      name: 'Acme',
+      clerkOrgId: 'org_acme',
+      clerkUserId: 'user_acme',
+    })
+    fixture = { db, workspaceId, clerkOrgId: 'org_acme', clerkUserId: 'user_acme' }
+  })
+
+  afterEach(async () => {
+    await fixture.db.close()
+  })
+
+  it('agrees with the Postgres transport on the same instance', async () => {
+    const a = await seedWatchlist(fixture.db, fixture.workspaceId, {
+      query: 'stori',
+      label: 'Fintech MX',
+    })
+    await seedCrawl(fixture.db, { workspaceId: fixture.workspaceId, watchlistId: a }, {
+      status: 'failed',
+      error: 'provider 503',
+    })
+    await seedWatchlist(fixture.db, fixture.workspaceId, { query: 'nu', label: 'Nu MX' })
+
+    const overPg = await getIngestionHealth(fixture.db)
+
+    // Replay what PostgREST would return for the same rows: identical values, JSON-encoded.
+    // Dates arrive as ISO strings rather than `Date`s, which is the divergence that would
+    // otherwise reach `summarizeIngestionHealth` and throw on `.getTime()` in production
+    // while every PGlite test stayed green.
+    const raw = await fixture.db.query<Record<string, unknown>>(
+      'select * from public.ingestion_health order by label, watchlist_id',
+    )
+    const body = JSON.parse(JSON.stringify(raw)) as unknown
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as unknown as typeof fetch
+
+    const overRest = await fetchIngestionHealth({
+      supabaseUrl: 'https://example.supabase.co',
+      serviceRoleKey: 'service-role-key',
+      fetchImpl,
+    })
+
+    // The point of the shared mapper, asserted rather than asserted-about. Two transports,
+    // one row shape — including the `date` staying a plain `YYYY-MM-DD` instead of picking
+    // up an instant and shifting by the reader's offset.
+    expect(overRest).toEqual(overPg)
+    expect(overRest[0]!.startedAt).toBeInstanceOf(Date)
+    expect(overRest.map((r) => r.marketDate)).toEqual(overPg.map((r) => r.marketDate))
+  })
+
+  it('sends the service-role key and asks for the whole view', async () => {
+    const calls: { url: string; init: RequestInit | undefined }[] = []
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      calls.push({ url, init })
+      return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } })
+    }) as unknown as typeof fetch
+
+    await fetchIngestionHealth({
+      supabaseUrl: 'https://example.supabase.co/',
+      serviceRoleKey: 'service-role-key',
+      fetchImpl,
+    })
+
+    // Trailing slash absorbed — a doubled slash is a 404 that reads like an outage.
+    expect(calls[0]!.url).toBe(
+      'https://example.supabase.co/rest/v1/ingestion_health?select=*&order=label%2Cwatchlist_id',
+    )
+    const headers = calls[0]!.init!.headers as Record<string, string>
+    expect(headers['apikey']).toBe('service-role-key')
+    expect(headers['authorization']).toBe('Bearer service-role-key')
+  })
+
+  it('throws rather than reporting an empty instance when the read fails', async () => {
+    const fetchImpl = (async () =>
+      new Response('nope', { status: 500, statusText: 'Internal Server Error' })) as unknown as typeof fetch
+
+    // The dangerous failure mode: a 500 decoded as `[]` summarizes to `ok`, and the alarm
+    // reports green precisely when the database is unreachable.
+    await expect(
+      fetchIngestionHealth({
+        supabaseUrl: 'https://example.supabase.co',
+        serviceRoleKey: 'service-role-key',
+        fetchImpl,
+      }),
+    ).rejects.toThrow(/500/)
   })
 })
 

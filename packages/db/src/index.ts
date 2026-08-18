@@ -12,13 +12,18 @@ export type {
   IdempotencyKey,
   IdempotentResult,
 } from './jobs.ts'
-export { getIngestionHealth, summarizeIngestionHealth } from './health.ts'
+export {
+  fetchIngestionHealth,
+  getIngestionHealth,
+  summarizeIngestionHealth,
+} from './health.ts'
 export type {
   IngestionHealthRow,
   IngestionHealthSummary,
   IngestionOffenceReason,
   IngestionOffender,
   IngestionState,
+  RestCredentials,
   SummarizeOptions,
 } from './health.ts'
 export { checksum, loadMigrations, runMigrations } from './migrate.ts'

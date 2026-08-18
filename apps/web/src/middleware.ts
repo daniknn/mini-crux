@@ -13,6 +13,11 @@ const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)',
   '/sign-up(.*)',
   '/api/health',
+  // "Public" here means "Clerk does not gate it", not "ungated". The ingestion alarm is
+  // called by an uptime checker that cannot hold a session, so it authenticates itself with
+  // a shared secret inside the handler. Letting Clerk bounce it first would make the alarm
+  // permanently red for a reason that has nothing to do with ingestion.
+  '/api/health/ingestion',
 ])
 
 export default clerkMiddleware(async (auth, request) => {

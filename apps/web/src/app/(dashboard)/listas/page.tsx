@@ -1,6 +1,8 @@
+import { getIngestionHealth, summarizeIngestionHealth } from '@mini-crux/db'
 import { listWatchlists, type Watchlist } from '@mini-crux/db/dashboard'
 
 import { EmptyState } from '../../../components/empty-state.tsx'
+import { IngestionHealthCard } from '../../../components/ingestion-health-card.tsx'
 import { Badge } from '../../../components/ui/badge.tsx'
 import {
   Card,
@@ -35,7 +37,13 @@ const KIND_LABEL: Record<string, string> = {
 }
 
 export default async function WatchlistsPage(): Promise<React.ReactElement> {
-  const watchlists = await withWorkspace((db) => listWatchlists(db))
+  // One round trip, one transaction, one tenant. `getIngestionHealth` reads the same view
+  // the uptime endpoint reads — here through RLS, so an operator sees their own workspace
+  // and only theirs.
+  const { watchlists, health } = await withWorkspace(async (db) => ({
+    watchlists: await listWatchlists(db),
+    health: summarizeIngestionHealth(await getIngestionHealth(db)),
+  }))
 
   const active = watchlists.filter((w) => w.isActive)
   const paused = watchlists.filter((w) => !w.isActive)
@@ -49,6 +57,10 @@ export default async function WatchlistsPage(): Promise<React.ReactElement> {
           conserva todo lo que ya observó.
         </p>
       </header>
+
+      {/* Above the create form on purpose: a missed crawl is today's problem and a new
+          watchlist is tomorrow's. */}
+      <IngestionHealthCard summary={health} />
 
       <Card>
         <CardHeader>
