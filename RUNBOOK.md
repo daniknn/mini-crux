@@ -204,6 +204,34 @@ select version, applied_at from public.schema_migrations order by version;
 The runner is idempotent and checksums every file. A checksum mismatch means a migration was
 edited after being applied — the fix is a new migration, never an edit to the old one.
 
+### When a migration fails
+
+**You are not in an outage.** The deploy aborted, the previous release is still serving, and
+the crawl clock is untouched — `pg_cron` lives in the database and does not care that a
+deploy failed. Nothing is burning; you have until 14:00 UTC tomorrow.
+
+The failing statement is in the deploy output:
+
+```bash
+fly logs -a mini-crux-worker | grep -i migrat
+```
+
+Each migration runs in its own transaction, so a failure leaves *that* file fully rolled
+back and no row in `schema_migrations`. Confirm which one is the boundary:
+
+```sql
+select version, applied_at from public.schema_migrations order by version desc limit 5;
+```
+
+Fix forward in a new commit and redeploy. Do **not** hand-apply the statement to unstick the
+deploy: the runner would then find the object already present, the migration would fail again
+for a new reason, and the database's real version stops matching what `schema_migrations`
+claims — which is the state every one of these guarantees is built to avoid.
+
+The one case that is not fix-forward: a migration that succeeded on a *previous* deploy and
+whose checksum has since changed. That means someone edited applied SQL. Restore the file to
+what shipped (`git log -p supabase/migrations/<file>`) and put the change in a new migration.
+
 ### Secrets
 
 Doppler is the only source (DashOne §3). Nothing is in a `Dockerfile`, `fly.toml`,
@@ -215,6 +243,36 @@ through `serverEnv()` / `loadSettings()`, which fail fast when it is missing.
 app gets `SUPABASE_DB_AUTHENTICATOR_URL` and never the former. Handing the web app the
 worker's URL serves every workspace's panel to everyone — with a green test suite, because
 the tests connect as `authenticated`.
+
+### Rotating one
+
+Change it in Doppler, then make each platform pick it up. Neither reads Doppler at runtime —
+both hold a copy, so a rotation that stops at Doppler changes nothing anywhere.
+
+```bash
+doppler secrets set HEALTH_CHECK_TOKEN=<new>          # the source
+doppler run -- fly secrets set HEALTH_CHECK_TOKEN=... # or `doppler integrations`
+# Vercel: redeploy — env vars are bound at build time for the server bundle
+```
+
+`fly secrets set` restarts the machines. That is safe by design: SIGTERM lets the job in
+flight finish and report, and anything that dies mid-crawl is returned to the queue by the
+reaper within 20 minutes. Rotating during the 14:00–16:00 UTC crawl window is still the one
+avoidable risk, because a restart there costs the crawl its remaining time, and the day
+cannot be re-crawled tomorrow. Rotate in the afternoon, market time.
+
+Two have an ordering that matters:
+
+- **`HEALTH_CHECK_TOKEN`** — update the *uptime checker* in the same sitting. Between the two
+  changes the alarm returns `401`, which is a page in the middle of the night for a change
+  nobody remembers making. If the checker cannot be updated first, expect that page.
+- **`SUPABASE_SERVICE_ROLE_KEY`** — held by the web app (for the health read and signed
+  poster URLs) *and* the ingestion CLI. Rotating in Supabase invalidates the old key
+  immediately, so both must be redeployed; the web app is the one that shows it, as the
+  alarm flipping to `"status": "unknown"`.
+
+Rotating `APIFY_TOKEN` is the safest of the set — nothing holds it but the worker, and a
+wrong value surfaces as a `failed` crawl with the provider's error in `crawl_runs.error`.
 
 ### `vercel.json`
 
