@@ -53,7 +53,13 @@ create table public.analysis_runs (
   -- That version records which build produced a measurement, not what it means, and a
   -- panel that spans a bug fix in the sampler legitimately carries both. Collapsing it to
   -- one value would either discard provenance or imply a uniformity the data does not have.
-  feature_schema_version integer not null,
+  --
+  -- Nullable for exactly one case, tied down by `analysis_runs_published_pins_version`
+  -- below: a run whose panel produced no cohort members at all has no version to pin,
+  -- because the version is read off the members' feature rows and there are none. That run
+  -- always refuses. Writing 0 or -1 instead would put a version number that never existed
+  -- into the column an operator uses to line a finding up against a feature definition.
+  feature_schema_version integer,
   extractor_versions     text[]  not null default '{}',
   analysis_version       text    not null,
 
@@ -124,6 +130,15 @@ create table public.analysis_runs (
   -- leaves the domain to the constraint whose job that is.
   constraint analysis_runs_gate_matches_outcome check (
     (failed_gate is null) = (outcome = 'published')
+  ),
+
+  -- A published run always pins a version; a refused one may have had no members to read one
+  -- from. Deliberately an implication and not an equivalence: a refused run *usually* does
+  -- have a version — it assembled cohorts and then failed a gate — so requiring null on
+  -- refusal would reject the common case. This is the weakest statement that still makes the
+  -- nullability above impossible to abuse.
+  constraint analysis_runs_published_pins_version check (
+    outcome <> 'published' or feature_schema_version is not null
   )
 );
 

@@ -171,7 +171,11 @@ describe('analysis panel', () => {
     await observe(workspaceB, foreign, runB, day(3), true)
     await addFeatures(workspaceB, foreign, measured())
 
-    panel = await asA(getAnalysisPanel)
+    // Read on the plain connection, which is how the job reads it: a BYPASSRLS worker
+    // scoped by the parameter alone. The `withTenant` readings below are the isolation
+    // tests, and they are separate on purpose — this one would keep passing if the
+    // parameter were ignored, so it must not be the one asserting tenancy.
+    panel = await getAnalysisPanel(db, workspaceA)
   })
 
   afterAll(async () => {
@@ -407,16 +411,27 @@ describe('analysis panel', () => {
 
   // ────────────────────────────── tenancy ──────────────────────────────
 
-  it('reads only the caller workspace panel', async () => {
-    const fromB = await asB(getAnalysisPanel)
+  it('scopes the job read to the workspace it was asked for', async () => {
+    // The worker path: no RLS in play, so the parameter is the whole of the isolation. Both
+    // directions are asserted — B's panel is exactly B's creative, and A's panel does not
+    // contain it — because a filter that returned everything would satisfy the first
+    // assertion on its own if B happened to be the only tenant with features.
+    const forB = await getAnalysisPanel(db, workspaceB)
 
-    expect(fromB.map((p) => p.creativeId)).toEqual([ids['b1-ajeno']])
+    expect(forB.map((p) => p.creativeId)).toEqual([ids['b1-ajeno']])
     expect(panel.map((p) => p.creativeId)).not.toContain(ids['b1-ajeno'])
   })
 
   it('leaks nothing when a tenant names another tenant workspace outright', async () => {
-    // The query has no workspace parameter to talk past, so the attempt has to be made in
-    // SQL: same view, same connection, an explicit filter for the other tenant's rows.
+    // The attack the explicit parameter makes possible: a caller authenticated as B asks the
+    // panel query for A's workspace id. The parameter says A, the policy on
+    // `creative_survival` says B, and an `and` of the two is empty — which is the point. A
+    // day when this returns rows is a day the view lost `security_invoker`.
+    const stolen = await asB((t) => getAnalysisPanel(t, workspaceA))
+    expect(stolen).toEqual([])
+
+    // And the same attempt made in raw SQL against the view, so the guarantee is pinned to
+    // the policy rather than to anything the helper does.
     const rows = await asB((t) =>
       t.query(`select creative_id from public.creative_survival where workspace_id = $1`, [
         workspaceA,

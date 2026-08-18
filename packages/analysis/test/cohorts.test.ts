@@ -28,6 +28,7 @@ const creative = (over: Partial<PanelCreative> = {}): PanelCreative => ({
   isCensored: false,
   hasGaps: false,
   featureSchemaVersion: 2,
+  extractorVersion: '0.3.1',
   features: {
     duration_s: 15,
     first_cut_time_s: 1.2,

@@ -46,6 +46,7 @@ export const LATEST_FEATURES = `
            f.skipped_features,
            f.truncated,
            f.schema_version,
+           f.extractor_version,
            f.duration_s::float8            as duration_s,
            f.first_cut_time_s::float8      as first_cut_time_s,
            f.cuts_per_second::float8       as cuts_per_second,

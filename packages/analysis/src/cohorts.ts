@@ -92,6 +92,14 @@ export interface PanelCreative {
   readonly hasGaps: boolean
   /** Null when no current feature row exists — *not attempted*, distinct from either null. */
   readonly featureSchemaVersion: number | null
+  /**
+   * Which extractor build produced the measurements. Provenance only — nothing in this
+   * module reads it, and nothing should: it records *how* a number was obtained, not what it
+   * means, so two creatives measured by different builds are still comparable. It rides on
+   * the panel rather than being queried separately so the versions a run records are exactly
+   * the versions of the rows it read.
+   */
+  readonly extractorVersion: string | null
   readonly features: Readonly<Partial<Record<AnalysisFeature, number | null>>>
   readonly skippedFeatures: readonly string[]
 }
@@ -123,6 +131,21 @@ export interface CohortAssembly {
   readonly censoringRateLong: number | null
   /** Advertisers contributing at least one cohort member, before any are dropped. */
   readonly strataTotal: number
+  /**
+   * Advertisers contributing to **both** cohorts — the only ones that inform the contrast.
+   *
+   * This is the number the `MIN_STRATA` gate reads, and it is deliberately not
+   * {@link strataTotal}. On a thin panel most advertisers land entirely in one cohort, so a
+   * gate reading the total would pass on a panel whose every comparison comes from one
+   * advertiser.
+   *
+   * It is also not the per-feature `strataUsed` on a {@link ContrastResult}: dropping a
+   * creative whose feature was never measurable can empty a stratum's cohort, so a feature
+   * can use fewer strata than the run. The gate is per analysis, so it reads the run's.
+   */
+  readonly strataUsed: number
+  /** Advertisers present in exactly one cohort, and therefore carrying no contrast. */
+  readonly strataDropped: number
 }
 
 /**
@@ -192,7 +215,9 @@ export function assembleCohorts(panel: readonly PanelCreative[]): CohortAssembly
   const counts = Object.fromEntries(PLACEMENTS.map((p) => [p, 0])) as Record<Placement, number>
   const members: CohortMember[] = []
   const versions = new Set<number>()
-  const advertisers = new Set<string>()
+  // Which cohorts each advertiser reached, not merely that it appeared. `strataUsed` is a
+  // question about both cohorts at once, so a Set of ids could not answer it.
+  const advertisers = new Map<string, { long: boolean; short: boolean }>()
   let censoredLong = 0
 
   for (const creative of panel) {
@@ -202,7 +227,15 @@ export function assembleCohorts(panel: readonly PanelCreative[]): CohortAssembly
 
     // Non-null by construction: `excluded_not_extracted` is decided above.
     versions.add(creative.featureSchemaVersion!)
-    advertisers.add(creative.advertiserId)
+
+    let reached = advertisers.get(creative.advertiserId)
+    if (!reached) {
+      reached = { long: false, short: false }
+      advertisers.set(creative.advertiserId, reached)
+    }
+    if (placement === 'long_lived') reached.long = true
+    else reached.short = true
+
     if (placement === 'long_lived' && creative.isCensored) censoredLong += 1
 
     members.push({
@@ -224,6 +257,11 @@ export function assembleCohorts(panel: readonly PanelCreative[]): CohortAssembly
   }
 
   const nLong = counts.long_lived
+  let strataUsed = 0
+  for (const reached of advertisers.values()) {
+    if (reached.long && reached.short) strataUsed += 1
+  }
+
   return {
     featureSchemaVersion: versions.size === 1 ? [...versions][0]! : null,
     members,
@@ -233,6 +271,8 @@ export function assembleCohorts(panel: readonly PanelCreative[]): CohortAssembly
     // running", which is a finding; the truth is that there is nothing to divide.
     censoringRateLong: nLong === 0 ? null : censoredLong / nLong,
     strataTotal: advertisers.size,
+    strataUsed,
+    strataDropped: advertisers.size - strataUsed,
   }
 }
 

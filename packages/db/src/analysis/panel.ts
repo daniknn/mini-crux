@@ -1,6 +1,6 @@
 import { ANALYSIS_FEATURES, type PanelCreative } from '@mini-crux/analysis'
 
-import { LATEST_FEATURES } from '../dashboard/internal.ts'
+import { asDate, LATEST_FEATURES } from '../dashboard/internal.ts'
 import type { SqlExecutor } from '../types.ts'
 
 /**
@@ -19,11 +19,24 @@ import type { SqlExecutor } from '../types.ts'
  * acceptable: this is a job, not a page load, and a panel large enough to strain it is a
  * panel large enough to have earned Kaplan-Meier instead.
  *
- * WHY NO WORKSPACE FILTER
+ * WHY THIS ONE TAKES AN EXPLICIT WORKSPACE FILTER AND THE DASHBOARD READS DO NOT
  *
- * The caller is inside `withTenant`, and `creative_survival` runs as the invoker with the
- * base tables' RLS applying. Adding `where workspace_id = $1` here would look like defence
- * in depth and act as camouflage the day a policy breaks. See `dashboard/internal.ts`.
+ * `dashboard/internal.ts` argues at length that a `where workspace_id = $1` beside an RLS
+ * policy is camouflage: it keeps the pages looking right on the day the policy breaks, so
+ * the leak is discovered by someone else. That argument holds for a request arriving through
+ * `withTenant` as `authenticated`, which is every dashboard read.
+ *
+ * It does not hold here. The only caller is the analysis job, which runs on a BYPASSRLS
+ * worker connection — the same connection the crawler uses — because it must write
+ * `analysis_runs`, and `authenticated` is granted select on that table and nothing else.
+ * There is no policy to be redundant with. Without this filter the job would assemble one
+ * cohort out of every tenant's creatives and publish it to whichever workspace the payload
+ * named, which is a cross-tenant leak with an audit trail.
+ *
+ * So the filter is the isolation, not a second layer over it, and `analysis-panel.test.ts`
+ * proves both readings: the job path scoped by the parameter, and the `withTenant` path
+ * where a caller naming another workspace's id gets nothing, because there the parameter and
+ * the policy have to agree.
  */
 
 interface PanelRow {
@@ -33,6 +46,7 @@ interface PanelRow {
   is_censored: boolean
   has_gaps: boolean
   feature_schema_version: number | null
+  extractor_version: string | null
   /** Never null: the query coalesces it, and the mapping below relies on that. */
   skipped_features: string[]
   duration_s: number | null
@@ -43,7 +57,10 @@ interface PanelRow {
   audio_energy_variance: number | null
 }
 
-export async function getAnalysisPanel(db: SqlExecutor): Promise<PanelCreative[]> {
+export async function getAnalysisPanel(
+  db: SqlExecutor,
+  workspaceId: string,
+): Promise<PanelCreative[]> {
   const rows = await db.query<PanelRow>(
     `select s.creative_id,
             s.advertiser_id,
@@ -59,6 +76,10 @@ export async function getAnalysisPanel(db: SqlExecutor): Promise<PanelCreative[]
             s.is_censored,
             s.has_gaps,
             f.schema_version::int           as feature_schema_version,
+            -- Provenance, never arithmetic. Which build produced the measurement, as opposed
+            -- to schema_version which pins what it means. A panel spanning a sampler bug fix
+            -- legitimately carries two, so the run records an array of them.
+            f.extractor_version,
             -- Coalesced because a creative with no feature row joins to all-nulls, and an
             -- absent array must read as "nothing was skipped" rather than as a null the
             -- caller has to re-interpret. The creative is excluded upstream either way, by
@@ -76,9 +97,11 @@ export async function getAnalysisPanel(db: SqlExecutor): Promise<PanelCreative[]
             f.audio_energy_variance
      from public.creative_survival s
      ${LATEST_FEATURES}
+     where s.workspace_id = $1
      -- Deterministic, so a re-run over an unchanged panel builds byte-identical strata and
      -- any difference between two runs is a difference in the panel.
      order by s.creative_id`,
+    [workspaceId],
   )
 
   return rows.map((row) => ({
@@ -88,6 +111,7 @@ export async function getAnalysisPanel(db: SqlExecutor): Promise<PanelCreative[]
     isCensored: row.is_censored,
     hasGaps: row.has_gaps,
     featureSchemaVersion: row.feature_schema_version,
+    extractorVersion: row.extractor_version,
     // Built from ANALYSIS_FEATURES rather than written out, so a seventh feature is wired
     // through by adding it to that list and its column below — not by remembering this
     // object exists. A missing column surfaces as a null, which `stratify` counts under
@@ -101,4 +125,49 @@ export async function getAnalysisPanel(db: SqlExecutor): Promise<PanelCreative[]
     // arrive.
     skippedFeatures: row.skipped_features,
   }))
+}
+
+/**
+ * How long this workspace has actually been looking, and which day the panel is dated to.
+ *
+ * `panelAgeDays` is a **count of distinct healthy crawl days**, not the calendar span
+ * between the first and the last. The two coincide on a panel that never missed a day and
+ * diverge exactly when it matters: a workspace crawled once in January and once in July has
+ * a span of 181 days and has observed two, and only the second number describes a panel that
+ * could support a survival contrast. The gate reads the conservative one.
+ *
+ * Only `succeeded` runs count, for the reason the survival view gives at length: a `suspect`
+ * run withheld its absences and a `failed` run wrote nothing, so neither is a day on which we
+ * could have watched a creative stop. Counting them would let a stretch of crawler outages
+ * age the panel past the gate without adding a single observation.
+ *
+ * Returns null when there is no healthy crawl at all. That is not an age of zero — a
+ * workspace that has never been crawled has no panel to date a run to, and the caller writes
+ * nothing rather than inventing a `panel_date`.
+ */
+export interface PanelWindow {
+  /** Logical day of the most recent healthy crawl, from `crawl_runs.run_date`. */
+  readonly panelDate: string
+  readonly panelAgeDays: number
+}
+
+export async function getPanelWindow(
+  db: SqlExecutor,
+  workspaceId: string,
+): Promise<PanelWindow | null> {
+  const [row] = await db.query<{ panel_date: string | null; panel_age_days: number }>(
+    `select ${asDate('max(run_date)')}       as panel_date,
+            count(distinct run_date)::int    as panel_age_days
+     from public.crawl_runs
+     where workspace_id = $1
+       and status = 'succeeded'`,
+    [workspaceId],
+  )
+
+  // An aggregate over no rows still returns one row, with a null max and a count of zero —
+  // so the emptiness has to be read off the value, not off the row count. Keying on
+  // `panel_date` rather than on `panel_age_days === 0` because the two are equivalent here
+  // only by luck: a future filter that keeps rows but no dates would separate them.
+  if (row === undefined || row.panel_date === null) return null
+  return { panelDate: row.panel_date, panelAgeDays: row.panel_age_days }
 }
