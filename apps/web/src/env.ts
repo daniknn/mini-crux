@@ -27,10 +27,16 @@ export function serverEnv(): {
   clerkSecretKey: string
   supabaseUrl: string
   supabaseServiceRoleKey: string
+  databaseUrl: string
 } {
   return {
     clerkSecretKey: required('CLERK_SECRET_KEY'),
     supabaseUrl: required('SUPABASE_URL'),
     supabaseServiceRoleKey: required('SUPABASE_SERVICE_ROLE_KEY'),
+    // Deliberately NOT `SUPABASE_DB_URL`. That one is the migration runner's connection:
+    // a direct session as `postgres`, which is BYPASSRLS because it has to create policies.
+    // Pointing the dashboard at it would disable every tenancy guarantee in the product
+    // while every test still passed, because the tests connect as `authenticated`.
+    databaseUrl: required('SUPABASE_DB_AUTHENTICATOR_URL'),
   }
 }
