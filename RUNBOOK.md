@@ -134,9 +134,16 @@ queue within 20 minutes and it retries by itself, so **the first response is to 
 reaper cycle.** If it is still stalled after that:
 
 ```sql
-select id, type, status, attempts, locked_by, heartbeat_at
+select id, type, status, attempts, started_at, heartbeat_at, last_error
 from public.jobs where status = 'running' order by heartbeat_at;
 ```
+
+There is deliberately no "which worker holds it" column to select. `app.claim_job` uses
+`for update skip locked` and stamps `heartbeat_at`, never an owner id, so a stale
+`heartbeat_at` *is* the answer to that question — the claim belongs to whichever process has
+stopped beating, and reaping is keyed on the timestamp rather than on identity. If you find
+yourself wanting the owner, what you actually want is `fly logs -a mini-crux-worker` around
+`started_at`.
 
 A `heartbeat_at` that is not advancing with a worker that *is* running means the handler is
 blocked, not the process — check `fly logs`. Restart with `fly apps restart mini-crux-worker`;
