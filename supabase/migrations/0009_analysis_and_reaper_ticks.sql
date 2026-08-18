@@ -108,7 +108,17 @@ begin
       'analysis',
       jsonb_build_object('panel_date', v_panel_date::text),
       app.new_ulid('trc_'),
-      jsonb_build_object('type', 'schedule', 'label', 'daily-analysis')
+      -- `id` is not optional. `isActor` requires it, and the analysis handler refuses a job
+      -- whose actor fails that check with a PermanentJobError — so an actor missing `id` is
+      -- not a cosmetic gap in an audit row, it is every scheduled analysis failing on its
+      -- first attempt with no retry. The crawl tick uses the watchlist id; this tick has no
+      -- watchlist, so it uses the cron entry's own name, which is what actually caused the
+      -- work and joins straight to `cron.job`.
+      jsonb_build_object(
+        'type', 'schedule',
+        'id', 'mini-crux-daily-analysis',
+        'label', 'daily-analysis'
+      )
     )
     on conflict (workspace_id, (payload ->> 'panel_date'))
       where type = 'analysis' and status in ('pending', 'running')

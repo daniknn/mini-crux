@@ -211,6 +211,16 @@ These are silent. Nothing crashes, the tests stay green, and the survival estima
   shipped value free to drift into reaping every healthy job. When two constants across a
   language boundary have a required relationship, assert it and **read one of them from source**
   rather than copying it.
+- **Assert against the contract, not against the implementation you just wrote.** Migration
+  0009's analysis tick built its actor as `{type, label}`, and the test asserted `actor.type`
+  and `actor.label` — the two fields the migration happened to set. Green, and wrong: `isActor`
+  requires `id`, the analysis handler raises a `PermanentJobError` when it fails, so **every**
+  scheduled analysis would have died on its first attempt with no retry, in a job nothing was
+  watching. The other two SQL producers set `id` correctly, which is exactly why nobody looked.
+  The contract lives in `@mini-crux/core`; call `isActor` from the test rather than restating
+  fields. General form: **a validator that exists in one language does not constrain a producer
+  written in another** — enumerate the producers from `pg_proc` and run each one's output
+  through the real predicate, or the cross-language gap stays invisible until production.
 - **A periodic mechanism observed once is indistinguishable from a one-shot.** The worker's
   heartbeat test aged `heartbeat_at` to nine minutes, waited, and asserted it had been reset —
   and `setInterval` → `setTimeout` survived it. One beat is all a single observation can see,

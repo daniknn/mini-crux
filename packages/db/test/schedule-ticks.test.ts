@@ -1,3 +1,4 @@
+import { isActor } from '@mini-crux/core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createTestDb, seedWorkspace, type TestDb } from '../src/testing.ts'
@@ -68,7 +69,15 @@ async function tick(db: TestDb, panelDate: string | null): Promise<number> {
 
 async function analysisJobs(
   db: TestDb,
-): Promise<{ id: string; payload: { panel_date?: string }; trace_id: string; actor: { type?: string; label?: string }; status: string }[]> {
+): Promise<
+  {
+    id: string
+    payload: { panel_date?: string }
+    trace_id: string
+    actor: { type?: string; id?: string; label?: string }
+    status: string
+  }[]
+> {
   return db.query(
     `select id, payload, trace_id, actor, status::text as status
      from public.jobs where type = 'analysis' order by created_at`,
@@ -101,7 +110,15 @@ describe('app.enqueue_daily_analysis', () => {
     const jobs = await analysisJobs(fixture.db)
     expect(jobs).toHaveLength(1)
     expect(jobs[0]!.payload.panel_date).toBe(PANEL_DATE)
+    // Checked with `isActor`, not field by field. Measured: this test originally asserted
+    // `type` and `label` — the two fields the migration happened to set — and passed while
+    // the actor was missing the required `id`. The analysis handler calls `isActor` and
+    // raises a PermanentJobError when it fails, so every scheduled analysis would have died
+    // on its first attempt with no retry, and only the end-to-end chain test found it.
+    // Assert against the contract, never against the implementation you just wrote.
+    expect(isActor(jobs[0]!.actor)).toBe(true)
     expect(jobs[0]!.actor.type).toBe('schedule')
+    expect(jobs[0]!.actor.id).toBe('mini-crux-daily-analysis')
     expect(jobs[0]!.actor.label).toBe('daily-analysis')
     // The job is ingress for its own trace: nothing upstream handed it one, because the
     // crawl that produced the panel finished hours ago on a different trace.
@@ -348,6 +365,82 @@ describe('scheduled ticks', () => {
       'enqueue_daily_crawls(target_date date)',
       'reap_stalled_jobs(stall_after interval)',
     ])
+  })
+
+  it('knows every SQL function that mints a job, so none skips the actor check', async () => {
+    // The `actor` contract is enforced in TypeScript by `isActor`, which means a producer
+    // written in SQL can mint a malformed one and nothing notices until a handler refuses
+    // the job in production. This list is the mechanism: adding a new job producer in SQL
+    // fails here, and the fix is to add it to the actor assertion below rather than to widen
+    // the list. Same shape as the `market_date` guardrail above — the catalog is the only
+    // place that knows what actually exists.
+    const rows = await db.query<{ proname: string }>(
+      `with app_functions as materialized (
+         select p.oid, p.proname
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'app' and p.prokind = 'f'
+       )
+       select proname from app_functions
+       where pg_get_functiondef(oid) ~* 'insert\\s+into\\s+public\\.jobs'
+       order by 1`,
+    )
+
+    expect(rows.map((r) => r.proname)).toEqual([
+      'enqueue_daily_analysis',
+      'enqueue_daily_crawls',
+      'enqueue_pending_extractions',
+    ])
+  })
+
+  it('mints an actor the handlers will accept, from every SQL producer', async () => {
+    // All three producers, driven for real, and every actor they wrote checked against the
+    // same predicate the workers use. `enqueue_daily_analysis` shipped without `id` and this
+    // is the assertion that would have caught it without needing the whole chain — the other
+    // two already had it, which is exactly why nobody looked.
+    const { workspaceId } = await seedWorkspace(db, {
+      slug: 'acme',
+      name: 'Acme',
+      clerkOrgId: 'org_acme',
+      clerkUserId: 'user_acme',
+    })
+
+    // Two watchlists: the seeded crawl_run occupies the first for this date, so the crawl
+    // tick's `on conflict (watchlist_id, run_date) do nothing` would otherwise make it a
+    // no-op and this test would assert over one actor while claiming to cover three.
+    const analyzed = await seedWatchlist(db, workspaceId, 'stori')
+    await seedWatchlist(db, workspaceId, 'nu')
+    await db.query(
+      `insert into public.crawl_runs (workspace_id, watchlist_id, run_date, status, trace_id, actor)
+       values ($1, $2, $3::date, 'succeeded', 'trc_test', '{"type":"schedule","id":"seed"}'::jsonb)`,
+      [workspaceId, analyzed, PANEL_DATE],
+    )
+
+    const advertiser = await db.query<{ id: string }>(
+      `insert into public.advertisers (workspace_id, meta_page_id, name)
+       values ($1, 'page_1', 'Stori') returning id`,
+      [workspaceId],
+    )
+    await db.query(
+      `insert into public.creatives (workspace_id, advertiser_id, creative_hash, media_type, media_url)
+       values ($1, $2, 'hash_1', 'video', 'https://cdn.example.test/a.mp4')`,
+      [workspaceId, advertiser[0]!.id],
+    )
+
+    await db.query('select app.enqueue_daily_crawls($1::date)', [PANEL_DATE])
+    await db.query('select app.enqueue_daily_analysis($1::date)', [PANEL_DATE])
+    // Takes an explicit feature schema version — it is the extractor's backlog reconciler,
+    // not a cron tick, which is why it is absent from the schedule assertions above.
+    await db.query('select app.enqueue_pending_extractions(1)')
+
+    const jobs = await db.query<{ type: string; actor: unknown }>(
+      'select type, actor from public.jobs order by type',
+    )
+    // All three fired, so the loop below is over three actors and not vacuous over an empty
+    // table — which is how this class of test usually passes while proving nothing.
+    expect(jobs.map((j) => j.type)).toEqual(['analysis', 'crawl', 'extract'])
+    for (const job of jobs) {
+      expect(isActor(job.actor), `${job.type} actor: ${JSON.stringify(job.actor)}`).toBe(true)
+    }
   })
 
   it('lets every scheduled call run with no arguments', async () => {
