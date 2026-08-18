@@ -35,6 +35,8 @@ describe('migration runner', () => {
     // forces someone to look at it alongside `rls.test.ts`.
     expect(tables.map((t) => t.table_name)).toEqual([
       'advertisers',
+      'analysis_feature_results',
+      'analysis_runs',
       'app_users',
       'audit_events',
       'crawl_runs',
