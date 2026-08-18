@@ -192,6 +192,19 @@ These are silent. Nothing crashes, the tests stay green, and the survival estima
   grows every dead creative's measured lifetime by a day for every day the crawler runs. When a
   test pins a value that two different implementations both produce, extend the fixture until
   they diverge.
+- **A default taken from `now()` is only observable at whatever o'clock the suite runs.** The
+  market conversion and a bare `now()::date` agree for eighteen hours out of twenty-four, so a
+  test written specifically to catch the difference passes six times out of seven. Take the
+  instant as a **parameter** (`app.market_date(at_instant timestamptz default now())`) so a test
+  can hand it 05:30 UTC and demand the previous day; the caller's default then has one job left,
+  and one assertion covers it. Generalizes past clocks: *anything read from ambient state is
+  tested at one arbitrary value unless it can be injected.*
+- **Pick fixture dates from a period where the candidate implementations disagree.** Mexico
+  abolished DST in 2022, so on every date this product will ever crawl,
+  `at time zone 'America/Mexico_City'` and `- interval '6 hours'` are the same function. A
+  mutation swapping one for the other survived fixtures in both April and November 2026. The
+  test that kills it uses **2021**, when the market was on CDT — a date nothing will ever be
+  crawled for, chosen solely because it is where the two expressions part company.
 - **A constant is untested until something pins it.** `DEFAULT_HEARTBEAT_INTERVAL_S` only means
   something relative to `app.reap_stalled_jobs`' stall window — a number in another language in
   another directory. Tests that pass an explicit override prove the mechanism and leave the
