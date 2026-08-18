@@ -13,6 +13,8 @@ export type {
   IdempotentResult,
 } from './jobs.ts'
 export { checksum, loadMigrations, runMigrations } from './migrate.ts'
+export { currentWorkspaceId, MissingTenantClaimsError, withTenant } from './tenant.ts'
+export type { TenantClaims } from './tenant.ts'
 export type {
   AppliedMigration,
   Logger,

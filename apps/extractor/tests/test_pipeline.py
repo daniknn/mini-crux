@@ -11,16 +11,21 @@ from pathlib import Path
 import pytest
 
 from extractor.backends import BackendUnavailable, NoAudioTrack
-from extractor.features import FEATURE_SCHEMA_VERSION
+from extractor.features import FEATURE_SCHEMA_VERSION, POSTER_MAX_WIDTH
 from extractor.pipeline import extract
 from extractor.testing import (
+    SCENE_PALETTE,
     FailingBackend,
     FakeAudio,
     FakeOcr,
     FakeTranscriber,
+    decode_jpeg,
     make_corrupt,
     make_image,
+    make_ramp_video,
+    make_segment_video,
     make_video,
+    mean_bgr,
 )
 from extractor.video import UnreadableMedia
 
@@ -240,3 +245,134 @@ class TestUnreadableMedia:
     def test_a_missing_file_raises(self, tmp_path: Path) -> None:
         with pytest.raises(UnreadableMedia):
             extract(tmp_path / "nope.mp4", media_type="video", ocr=FakeOcr())
+
+
+class TestPosterFrame:
+    """Where in the ad the gallery thumbnail is cut from.
+
+    The whole rule is "not the first frame": Ad Library re-encodes very often open on black
+    or a platform chrome card, and a gallery of black squares is a gallery of nothing. That
+    makes the fixture the hard part. Against `make_video`'s equal flat scenes, `t=0`,
+    `first_cut / 2` and the 1.0s fallback all land in the same flat opening colour and
+    produce byte-identical posters — a suite that would stay green with the rule deleted.
+
+    So these use a *ramp*: an opening shot whose brightness rises steadily, where each of
+    the three candidate timestamps yields a different and predictable grey.
+    """
+
+    def test_the_poster_is_cut_at_half_the_first_cut(self, tmp_path: Path) -> None:
+        # Ramp 0 → 200 over 4s, then one hard cut into green at 4.0s. The first cut is
+        # therefore at 4.0s and the poster belongs at 2.0s, where brightness is ~100.
+        ramp = make_ramp_video(tmp_path / "ramp.mp4", ramp_s=4.0, tail_s=1.0, peak=200)
+
+        features = extract(ramp, media_type="video", ocr=FakeOcr(), cap_s=120.0)
+
+        assert features.first_cut_time_s == pytest.approx(4.0, abs=0.15)
+        assert features.poster_jpeg is not None
+        blue, green, red = mean_bgr(decode_jpeg(features.poster_jpeg))
+
+        # The exact expected value, not `> 0`. Each competing implementation lands on a
+        # different, checkable grey: the first frame is ~0, the 1.0s fallback is ~50, the
+        # cut itself is green. Only halving the first cut gives ~100.
+        assert blue == pytest.approx(100, abs=15)
+        assert (blue, green, red) == pytest.approx((blue, blue, blue), abs=6), (
+            "poster is not grey — it came from the green tail, i.e. from the cut itself"
+        )
+
+    def test_an_early_first_cut_falls_back_instead_of_landing_back_in_the_lead_in(
+        self, tmp_path: Path
+    ) -> None:
+        """A 0.3s black lead-in is a cut, and half of it is still black.
+
+        This is the case that decides the fallback is a floor rather than a default. Meta's
+        re-encodes routinely start with a fraction of a second of black; that transition is
+        detected as the first cut, so a literal `first_cut / 2` puts the poster at 0.15s —
+        back inside the black — for exactly the creatives the rule was written to protect.
+        """
+        video = make_segment_video(
+            tmp_path / "lead.mp4",
+            [(0.3, (0, 0, 0)), (2.7, SCENE_PALETTE[1]), (1.0, SCENE_PALETTE[2])],
+        )
+
+        features = extract(video, media_type="video", ocr=FakeOcr(), cap_s=120.0)
+
+        assert features.first_cut_time_s == pytest.approx(0.3, abs=0.15)
+        assert features.poster_jpeg is not None
+        blue, _green, _red = mean_bgr(decode_jpeg(features.poster_jpeg))
+        # The bright opening shot, not the black lead-in it was cut from.
+        assert blue == pytest.approx(SCENE_PALETTE[1][0], abs=15)
+
+    def test_a_single_shot_video_still_gets_a_poster(self, tmp_path: Path) -> None:
+        # No cut to halve. A one-shot ad is an ordinary ad, not a degraded one, so it gets
+        # a poster from the fallback rather than an entry in skipped_features.
+        video = make_video(tmp_path / "one.mp4", scenes=1, seconds=3.0, fps=24)
+
+        features = extract(video, media_type="video", ocr=FakeOcr(), cap_s=120.0)
+
+        assert features.first_cut_time_s is None
+        assert "poster_storage_path" not in features.skipped_features
+        assert features.poster_jpeg is not None
+        blue, _g, _r = mean_bgr(decode_jpeg(features.poster_jpeg))
+        assert blue == pytest.approx(SCENE_PALETTE[0][0], abs=15)
+
+    def test_a_still_is_its_own_poster(self, tmp_path: Path) -> None:
+        image = make_image(tmp_path / "ad.jpg")
+
+        features = extract(image, media_type="image", ocr=FakeOcr())
+
+        assert features.poster_jpeg is not None
+        assert mean_bgr(decode_jpeg(features.poster_jpeg)) == pytest.approx((120, 90, 60), abs=6)
+        assert "poster_storage_path" not in features.skipped_features
+
+    def test_the_poster_is_downscaled(self, tmp_path: Path) -> None:
+        wide = make_video(tmp_path / "wide.mp4", scenes=2, seconds=2.0, size=(1280, 720))
+
+        features = extract(wide, media_type="video", ocr=FakeOcr(), cap_s=120.0)
+
+        assert features.poster_jpeg is not None
+        height, width = decode_jpeg(features.poster_jpeg).shape[:2]
+        assert width == POSTER_MAX_WIDTH
+        # Aspect ratio preserved: a squashed thumbnail misrepresents the creative's format,
+        # and format is one of the things an operator reads the gallery for.
+        assert height == pytest.approx(720 * POSTER_MAX_WIDTH / 1280, abs=1)
+
+    def test_the_poster_never_lands_in_the_features_row(self, tmp_path: Path) -> None:
+        # `poster_jpeg` is transit, not a column. If it reached `to_row()` the worker would
+        # try to bind a few hundred kilobytes of JPEG as a `text` parameter.
+        features = extract(
+            make_video(tmp_path / "x.mp4", scenes=2, seconds=2.0),
+            media_type="video",
+            ocr=FakeOcr(),
+        )
+        assert features.poster_jpeg is not None
+        assert "poster_jpeg" not in features.to_row()
+        assert "poster_storage_path" in features.to_row()
+
+    def test_a_failed_encode_is_a_skip_and_costs_nothing_else(
+        self, video: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Best-effort, never fails the job.
+
+        A creative with no poster still has a duration, a cut rate and a transcript, and
+        those belong in the panel. The skip entry is what tells the gallery to render a
+        text card rather than an image element pointing at nothing.
+        """
+        import extractor.pipeline as pipeline_module
+
+        def boom(_frame: object) -> bytes:
+            raise RuntimeError("libjpeg exploded")
+
+        monkeypatch.setattr(pipeline_module, "encode_poster", boom)
+
+        features = extract(
+            video,
+            media_type="video",
+            ocr=FakeOcr(frames_with_text={0}),
+            transcriber=FakeTranscriber(),
+            audio=FakeAudio(),
+        )
+
+        assert features.skipped_features == ["poster_storage_path"]
+        assert features.poster_jpeg is None
+        assert features.duration_s == pytest.approx(3.0, abs=0.05)
+        assert features.first_line_transcript == "primera línea"

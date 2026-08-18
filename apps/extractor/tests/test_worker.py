@@ -15,7 +15,7 @@ import pytest
 
 from extractor import media as media_module
 from extractor.features import FEATURE_SCHEMA_VERSION
-from extractor.media import MemoryMediaStore, media_path
+from extractor.media import MemoryMediaStore, media_path, poster_path
 from extractor.store import Creative
 from extractor.testing import (
     FakeAudio,
@@ -23,6 +23,7 @@ from extractor.testing import (
     FakeTranscriber,
     FlakyMediaStore,
     MemoryJobStore,
+    PosterHostileMediaStore,
     SlowMediaStore,
     drain,
     make_corrupt,
@@ -171,17 +172,22 @@ class TestVersioning:
         worker = build_worker(store, media_store)
         await worker.run_once()
 
-        assert store.mark_stale(below_version=2) == 1
+        # Relative to the shipped version rather than the literal 1 and 2 this used to
+        # hard-code. A bump is a routine event — v2 added the poster frame — and a test
+        # written against the version numbers of the day fails on the next bump for no
+        # reason, which teaches whoever bumps to edit the assertion instead of reading it.
+        nxt = FEATURE_SCHEMA_VERSION + 1
+        assert store.mark_stale(below_version=nxt) == 1
         store.enqueue(
-            creative_id="cr_1", workspace_id=WORKSPACE, message_id="msg_2", schema_version=2
+            creative_id="cr_1", workspace_id=WORKSPACE, message_id="msg_2", schema_version=nxt
         )
         await worker.run_once()
         worker.close()
 
-        # Both rows survive. Keeping v1 is what makes the bump auditable: without it you
-        # cannot tell a definition change from a change in the media itself.
-        assert store.features[("cr_1", 1)].is_stale is True
-        assert store.features[("cr_1", 2)].schema_version == 2
+        # Both rows survive. Keeping the older one is what makes a bump auditable: without
+        # it you cannot tell a definition change from a change in the media itself.
+        assert store.features[("cr_1", FEATURE_SCHEMA_VERSION)].is_stale is True
+        assert store.features[("cr_1", nxt)].schema_version == nxt
 
     async def test_a_stale_row_does_not_count_as_already_extracted(
         self, video_bytes: bytes
@@ -192,8 +198,8 @@ class TestVersioning:
         worker = build_worker(store, media_store)
         await worker.run_once()
 
-        store.features[("cr_1", 1)].is_stale = True
-        assert await store.already_extracted("cr_1", 1) is False
+        store.features[("cr_1", FEATURE_SCHEMA_VERSION)].is_stale = True
+        assert await store.already_extracted("cr_1", FEATURE_SCHEMA_VERSION) is False
         worker.close()
 
 
@@ -363,16 +369,22 @@ class TestMediaLanding:
         worker = build_worker(store, media_store)
         await worker.run_once()
 
-        store.mark_stale(below_version=2)
+        # Relative to the shipped version, not literal: at a literal 2 this second run became
+        # a no-op the moment FEATURE_SCHEMA_VERSION reached 2, and the assertion below is
+        # then satisfied by the *first* run — which reused storage only because
+        # `seed_creative` pre-landed it. The re-extraction this test is named for would stop
+        # happening and nothing would say so.
+        nxt = FEATURE_SCHEMA_VERSION + 1
+        assert store.mark_stale(below_version=nxt) == 1
         store.enqueue(
-            creative_id="cr_1", workspace_id=WORKSPACE, message_id="msg_2", schema_version=2
+            creative_id="cr_1", workspace_id=WORKSPACE, message_id="msg_2", schema_version=nxt
         )
-        await worker.run_once()
+        assert await worker.run_once() is True
         worker.close()
 
         # The signed URL is long dead by the time a version bump lands. Storage is the only
         # copy that can still answer, which is why landing is write-once and unconditional.
-        assert store.features[("cr_1", 2)].media.reused is True
+        assert store.features[("cr_1", nxt)].media.reused is True
 
     async def test_a_fetch_failure_is_permanent_not_a_retry_storm(
         self, monkeypatch: pytest.MonkeyPatch
@@ -402,3 +414,133 @@ class TestMediaLanding:
 
         assert store.job("job_1")["status"] == "failed"
         assert "expired signature" in store.job("job_1")["last_error"]
+
+
+class TestPosterUpload:
+    """The poster is the one artefact the worker is allowed to lose.
+
+    It is a thumbnail, not a measurement: nothing in UC-5 correlates on it, so a storage
+    outage must cost the gallery an image and cost the panel nothing. What it must never do
+    is leave `poster_storage_path` pointing at an object that was never written — a null the
+    gallery handles and a dangling path it does not.
+    """
+
+    def poster_key(self, media_store: MemoryMediaStore) -> str:
+        keys = [k for k in media_store.objects if ".poster." in k]
+        assert len(keys) == 1, f"expected exactly one poster, got {keys}"
+        return keys[0]
+
+    async def test_the_poster_lands_beside_the_media_and_the_row_points_at_it(
+        self, video_bytes: bytes
+    ) -> None:
+        store, media_store = MemoryJobStore(), MemoryMediaStore()
+        creative = seed_creative(store, media_store, creative_id="cr_1", body=video_bytes)
+        store.enqueue(creative_id="cr_1", workspace_id=WORKSPACE, message_id="msg_1")
+        worker = build_worker(store, media_store)
+
+        await worker.run_once()
+        worker.close()
+
+        stored = store.features[("cr_1", FEATURE_SCHEMA_VERSION)]
+        expected = poster_path(stored.media.path, FEATURE_SCHEMA_VERSION)
+
+        # The exact key, not "a key": the column is a pointer, and a path the row names but
+        # storage does not hold is a broken image everywhere it renders.
+        assert stored.features.poster_storage_path == expected
+        assert self.poster_key(media_store) == expected
+        assert media_store.content_types[expected] == "image/jpeg"
+        assert media_store.objects[expected][:2] == b"\xff\xd8"  # JPEG SOI
+        assert "poster_storage_path" not in stored.features.skipped_features
+        assert creative.id == "cr_1"
+
+    async def test_the_poster_key_carries_the_schema_version(self, video_bytes: bytes) -> None:
+        """Otherwise a re-extraction hits write-once and keeps the *old* definition's frame.
+
+        The poster path is derived from the media path, which does not change between
+        versions. Without the version in the key, a v3 re-extraction would `put` to a key
+        that already holds the v2 image, `land_poster` would swallow the refusal as the
+        ordinary race it usually is, and the row would point at a poster cut under a
+        definition it no longer describes — the exact silent-mixing failure
+        FEATURE_SCHEMA_VERSION exists to prevent.
+        """
+        store, media_store = MemoryJobStore(), MemoryMediaStore()
+        seed_creative(store, media_store, creative_id="cr_1", body=video_bytes)
+        store.enqueue(creative_id="cr_1", workspace_id=WORKSPACE, message_id="msg_1")
+        worker = build_worker(store, media_store)
+        await worker.run_once()
+
+        first = self.poster_key(media_store)
+
+        nxt = FEATURE_SCHEMA_VERSION + 1
+        store.mark_stale(below_version=nxt)
+        store.enqueue(
+            creative_id="cr_1", workspace_id=WORKSPACE, message_id="msg_2", schema_version=nxt
+        )
+        await worker.run_once()
+        worker.close()
+
+        second = store.features[("cr_1", nxt)].features.poster_storage_path
+        assert second != first
+        assert second == poster_path(store.features[("cr_1", nxt)].media.path, nxt)
+        assert second in media_store.objects
+
+    async def test_a_storage_outage_leaves_a_null_and_a_skip_not_a_dangling_path(
+        self, video_bytes: bytes
+    ) -> None:
+        store, inner = MemoryJobStore(), MemoryMediaStore()
+        seed_creative(store, inner, creative_id="cr_1", body=video_bytes)
+        media_store = PosterHostileMediaStore(inner)
+        store.enqueue(creative_id="cr_1", workspace_id=WORKSPACE, message_id="msg_1")
+        worker = build_worker(store, media_store)
+
+        assert await worker.run_once() is True
+        worker.close()
+
+        assert media_store.refused == 1
+        assert store.job("job_1")["status"] == "succeeded"
+
+        stored = store.features[("cr_1", FEATURE_SCHEMA_VERSION)]
+        # Null *and* skipped: the pair is what tells the gallery this creative has no image
+        # rather than an image that failed to load, and keeps it out of any n computed over
+        # posters. A path here would name an object the refusal above proves does not exist.
+        assert stored.features.poster_storage_path is None
+        assert "poster_storage_path" in stored.features.skipped_features
+        assert not any(".poster." in k for k in inner.objects)
+
+        # Everything the panel actually correlates on survived the outage untouched.
+        assert stored.features.duration_s == pytest.approx(3.0, abs=0.05)
+        assert stored.features.cuts_per_second is not None
+        assert stored.features.text_density is not None
+        assert stored.features.skipped_features == ["poster_storage_path"]
+
+    async def test_a_poster_already_in_storage_is_not_an_error(self, video_bytes: bytes) -> None:
+        """Two workers on one creative encode the same frame to the same key.
+
+        A reaped job that was in fact still healthy is the ordinary way it happens. The
+        second writer losing the race must still finish its job and still record the path —
+        the bytes it would have written are the bytes already there.
+        """
+        store, media_store = MemoryJobStore(), MemoryMediaStore()
+        seed_creative(store, media_store, creative_id="cr_1", body=video_bytes)
+        store.enqueue(creative_id="cr_1", workspace_id=WORKSPACE, message_id="msg_1")
+        worker = build_worker(store, media_store)
+        await worker.run_once()
+
+        expected = self.poster_key(media_store)
+        media_store.objects[expected] = b"\xff\xd8 written by the other worker"
+
+        nxt = FEATURE_SCHEMA_VERSION + 1
+        store.mark_stale(below_version=nxt)
+        store.enqueue(
+            creative_id="cr_1", workspace_id=WORKSPACE, message_id="msg_2", schema_version=nxt
+        )
+        # Re-point the v(n+1) key at an existing object so the second run loses the race.
+        media_store.objects[
+            poster_path(media_path(WORKSPACE, "tuple:cr_1", "https://x/ad.mp4", "video"), nxt)
+        ] = b"\xff\xd8 squatted"
+        assert await worker.run_once() is True
+        worker.close()
+
+        row = store.features[("cr_1", nxt)]
+        assert row.features.poster_storage_path is not None
+        assert "poster_storage_path" not in row.features.skipped_features

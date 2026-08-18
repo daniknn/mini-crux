@@ -1,6 +1,6 @@
 [project]
 name = "mini-crux-extractor"
-version = "0.2.0"
+version = "0.3.0"
 description = "Structural video feature extraction for Mini Crux creatives."
 requires-python = ">=3.12"
 
