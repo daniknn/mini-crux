@@ -68,7 +68,7 @@ describe('migration runner', () => {
        where n.nspname = 'public' and c.relkind = 'v'
        order by c.relname`,
     )
-    expect(views.map((v) => v.table_name)).toEqual(['creative_survival'])
+    expect(views.map((v) => v.table_name)).toEqual(['creative_survival', 'ingestion_health'])
     // Read out of the live catalog, not out of the migration text. `check-rls-policies.mjs`
     // greps the SQL; this proves Postgres actually accepted the option, which is what
     // decides whether the view leaks every workspace's panel to any caller.
