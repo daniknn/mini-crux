@@ -81,6 +81,20 @@
 - **Install scripts are opt-in.** New dependencies that want to run code at install time are
   recorded in `allowBuilds` in `pnpm-workspace.yaml`, with a note on why. Never wave one
   through with a CLI flag.
+- **A function that returns a row MUST `return setof`, never a bare composite.** Postgres
+  expands `select (app.f(...)).*` into one evaluation *per output column* before it optimizes,
+  so a single-looking claim actually runs a dozen times, each claiming and abandoning a
+  different job. `returns setof` forces `select * from app.f(...)`, which evaluates once, and
+  makes "nothing found" zero rows instead of a row of nulls that reads like a real result.
+  Symptom if you get it wrong: `claim_job` returns all-nulls, and jobs vanish into `running`.
+- **A `CASE` over string literals is type `unknown`.** Assigning one to an enum column is a
+  parse error, not an inference — `set status = case … end` fails with `transformAssignedExpr`.
+  Cast it explicitly: `(case … end)::public.job_status`. See `app.reap_stalled_jobs` in `0004`.
+- **Keep worker SQL in files, not in Python string literals.** `apps/extractor/src/extractor/
+  statements/*.sql` is loaded by the worker *and* `PREPARE`d against a freshly-migrated PGlite
+  by `packages/db/test/worker-sql.test.ts`. That is the only thing checking the Python worker's
+  columns against the real schema — PGlite cannot be imported from Python, and a renamed column
+  is otherwise invisible until it runs in production against data that cannot be re-crawled.
 
 ## Panel guardrails (the failure modes that corrupt the outcome variable)
 
@@ -101,6 +115,25 @@ These are silent. Nothing crashes, the tests stay green, and the survival estima
 - **Prove a test can fail before trusting it.** Panel tests pass vacuously with alarming ease
   — a suite that only asserts "rows exist" is satisfied by almost any bug. Each of the three
   rules above was verified by mutating the source and confirming the specific test went red.
+- **`> 0` and `is not None` are not assertions, they are decoration.** A feature measured over
+  the wrong window is still positive, still non-null, still a complete-looking row. UC-2's
+  `cuts_per_second` was divided by the full duration instead of the analyzed span and the
+  truncation test passed anyway, biasing every long creative's cut rate downward by exactly its
+  truncation ratio. Assert the **exact expected value** for anything UC-5 will correlate on.
+- **A rate computed over a capped sample uses the analyzed span as its denominator**, never the
+  full duration, and the cap goes on the row. A `text_density` over the first 60s of a 3-minute
+  ad is a different quantity from one over the whole ad, and the analysis has to be able to
+  tell which one it is holding.
+- **Three kinds of null, and collapsing them corrupts the outcome variable.** Measured-absent
+  is `null` with *no* `skipped_features` entry (a single-shot video genuinely has 0 cuts — it
+  belongs in the n). Not-measurable is `null` *with* an entry. Not-attempted is no row at all.
+  A feature that zeroes what it could not measure silently moves creatives between cohorts.
+- **A constant is untested until something pins it.** `DEFAULT_HEARTBEAT_INTERVAL_S` only means
+  something relative to `app.reap_stalled_jobs`' stall window — a number in another language in
+  another directory. Tests that pass an explicit override prove the mechanism and leave the
+  shipped value free to drift into reaping every healthy job. When two constants across a
+  language boundary have a required relationship, assert it and **read one of them from source**
+  rather than copying it.
 
 ## Specs
 

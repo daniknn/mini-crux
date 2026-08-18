@@ -97,9 +97,15 @@ jobs:
       # Audits the resolved dependency set rather than the installed environment:
       # `pip-audit` cannot look up the local editable project on PyPI, and --strict would
       # (correctly) refuse to silently skip it.
+      #
+      # `--all-extras` on purpose, even though this job installs only `dev`. The `ml` extra
+      # is not optional in production — torch, easyocr and faster-whisper are what actually
+      # runs on Fly.io — so auditing the installed set would gate the dependencies that
+      # never leave CI while ignoring the ones that do. Exporting resolves metadata without
+      # downloading ~2GB of wheels, so the extra coverage costs nothing.
       - name: Audit dependencies
         run: |
-          uv export --no-emit-project --format requirements-txt \
+          uv export --all-extras --no-emit-project --format requirements-txt \
             | uv run --with pip-audit pip-audit --strict -r /dev/stdin
 
   secret-hygiene:

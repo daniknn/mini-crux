@@ -38,6 +38,7 @@ describe('migration runner', () => {
       'app_users',
       'audit_events',
       'crawl_runs',
+      'creative_features',
       'creative_observations',
       'creatives',
       'jobs',
