@@ -1,0 +1,30 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Install scripts are opt-in. pnpm refuses to install until every package that wants to run
+# code at install time is listed here with an explicit true/false. Each entry is a
+# supply-chain decision — decide it deliberately and record why, never wave one through
+# with a CLI flag.
+#
+# All three below are `false`: each ships its native binary as a platform-specific
+# optionalDependency, which pnpm installs directly. The install script is only a fallback
+# for resolvers that skip optional deps, so skipping it costs nothing here. Verified by
+# `pnpm build` and the full suite running green without them.
+allowBuilds:
+  '@clerk/shared': false
+  sharp: false
+  unrs-resolver: false
+
+# Advisory remedies for transitive dependencies we do not control directly (DashOne §1:
+# fix CVEs by bumping the direct dep or adding overrides). Next 15 pins older copies of
+# both; the stack decision to stay on Next 15 is in ARCHITECTURE.md, so the fix goes here
+# rather than in a framework upgrade.
+#
+# Revisit both when Next itself bumps them — an override that has caught up with upstream
+# is dead weight that quietly pins a version nobody is watching.
+overrides:
+  # GHSA-fxqj-rqcc-2cmp and three others: postcss parsing issues. Patched in 8.5.23+.
+  postcss: ^8.5.26
+  # Patched in 0.35.0+.
+  sharp: ^0.35.3

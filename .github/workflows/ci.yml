@@ -1,0 +1,118 @@
+name: CI
+
+# Gates every PR into staging and main (DashOne §1). Nothing here needs secrets: the
+# database tests run against PGlite in-process, so CI proves the tenancy contract without
+# a Supabase project or a Docker service.
+on:
+  pull_request:
+    branches: [staging, main]
+  push:
+    branches: [staging, main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # No `submodules: true`: `.dashone` is a private repo holding the engineering
+      # standard, which is guidance for humans and agents reading the code — nothing in
+      # the build or the tests reads it. Fetching it would make CI depend on a token with
+      # access to another private repo, for no benefit.
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          # 24, not 22: the migration CLI is a .ts entrypoint run directly by node, and
+          # type stripping is only unflagged from 23.6 onward. On 22 it would need
+          # --experimental-strip-types and emit a warning on every run.
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Static tenancy gate: catches a table added with no RLS policy in seconds, before
+      # anyone waits on the suite. The live-catalog version runs in packages/db tests.
+      - name: RLS policy check
+        run: pnpm check:rls
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      # Advisories are a gate, not a newsletter (DashOne §1). `--prod` scopes this to what
+      # actually ships; dev-only advisories are surfaced by the audit-dev step as a warning.
+      - name: Audit dependencies
+        run: pnpm audit --prod --audit-level moderate
+
+      - name: Audit dev dependencies (advisory)
+        run: pnpm audit --audit-level high
+        continue-on-error: true
+
+      # Placeholder keys: Clerk validates the *format* of a publishable key at build time,
+      # so the build needs a syntactically valid one. It never contacts Clerk — no real
+      # credential is required to prove the app compiles.
+      - name: Build
+        env:
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_dmVyaWZpZWQtdG9tY2F0LTk5LmNsZXJrLmFjY291bnRzLmRldiQ=
+          CLERK_SECRET_KEY: sk_test_ci_placeholder
+        run: pnpm build
+
+  extractor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/extractor
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pinned to an exact version, unlike the others: setup-uv publishes no floating
+      # major tag, so `@v10` does not resolve.
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --extra dev
+
+      - name: Test
+        run: uv run pytest -q
+
+      # Audits the resolved dependency set rather than the installed environment:
+      # `pip-audit` cannot look up the local editable project on PyPI, and --strict would
+      # (correctly) refuse to silently skip it.
+      - name: Audit dependencies
+        run: |
+          uv export --no-emit-project --format requirements-txt \
+            | uv run --with pip-audit pip-audit --strict -r /dev/stdin
+
+  secret-hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # UC-0 acceptance criterion: no key-shaped string outside .env.example placeholders.
+      - name: Check for committed secrets
+        run: |
+          if git grep -nIE '(sk_live_|sk_test_|apify_api_[A-Za-z0-9]|eyJ[A-Za-z0-9_-]{20,}\.)' \
+               -- ':!.env.example' ':!.github/workflows/ci.yml'; then
+            echo "::error::Key-shaped string committed outside .env.example. Secrets live in Doppler."
+            exit 1
+          fi
+          echo "No key-shaped strings found outside .env.example."

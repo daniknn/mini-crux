@@ -58,6 +58,30 @@
 12. **Spanish UI, English code.** User-facing strings in Mexican Spanish; identifiers, comments,
     commits and docs in US English.
 
+## Postgres guardrails (learned from real failures — do not relearn these)
+
+- **A `language sql` function body is validated at CREATE time.** Postgres parses it under
+  `check_function_bodies`, so a helper that reads a table **MUST** be defined *after* that
+  table. Keep table-independent helpers (`app.jwt_claim`) in the helper block at the top of the
+  migration and define table-reading helpers (`app.current_workspace_id`, `app.current_user_id`)
+  directly below the table they read. Symptom if you get it wrong: `relation "public.x" does not
+  exist` when the migration runs — never at review time.
+- **Any helper called from an RLS policy on a table it reads MUST be `security definer`.**
+  Policy expressions are themselves subject to RLS, so an INVOKER function recurses until
+  Postgres aborts with `ERRORDATA_STACK_SIZE exceeded`. Always pair it with
+  `set search_path = ''` and fully-qualified names, or `security definer` becomes a privilege
+  escalation. Symptom if you get it wrong: policies quietly return zero rows *before* they blow
+  the error stack — which reads like "isolation works" right up until everything fails.
+- **RLS denies any command that has no permissive policy for it, regardless of grants.** A
+  `grant insert` with only a `for select` policy is dead code. If a client role is granted a
+  command, that command needs its own policy — see `audit_events_tenant_append` in `0001`.
+- **Never run a tenancy assertion on the default PGlite connection.** It is a superuser, and
+  superusers bypass RLS even with `FORCE ROW LEVEL SECURITY`. Always go through
+  `asAuthenticated` (`packages/db/src/testing.ts`).
+- **Install scripts are opt-in.** New dependencies that want to run code at install time are
+  recorded in `allowBuilds` in `pnpm-workspace.yaml`, with a note on why. Never wave one
+  through with a CLI flag.
+
 ## Specs
 
 Spec dir: `specs/`. No feature starts without its spec. Index and status: `specs/README.md`.

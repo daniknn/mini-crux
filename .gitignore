@@ -28,3 +28,10 @@ data/models/
 .vercel/
 .fly/
 .DS_Store
+
+# Python lockfile is committed (uv.lock); build artifacts are not
+apps/extractor/*.egg-info/
+apps/extractor/build/
+
+# Next.js
+next-env.d.ts
