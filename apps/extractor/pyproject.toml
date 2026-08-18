@@ -1,18 +1,32 @@
 [project]
 name = "mini-crux-extractor"
-version = "0.1.0"
+version = "0.2.0"
 description = "Structural video feature extraction for Mini Crux creatives."
 requires-python = ">=3.12"
 
-# UC-0 pins only what the job loop needs. The heavy CV/audio stack (opencv-python,
-# easyocr, faster-whisper, librosa) lands in UC-2 with the extraction code itself —
-# adding ~2GB of wheels before there is anything to extract only slows CI down.
+# Split deliberately. `opencv-python-headless` and numpy are cheap (~50MB) and carry the
+# geometry half of the feature set, so they are core: a worker without them cannot do its
+# job at all. The model half — easyocr and faster-whisper pull torch, ~2GB — sits in the
+# `ml` extra and is imported lazily, so a worker missing it still extracts duration and
+# cuts and records the rest as skipped (see backends.BackendUnavailable).
+#
+# The consequence is stated plainly in specs/UC-2: CI installs core + dev only, so it
+# proves the *pipeline* — sampling, degradation, idempotency, versioning — and not the
+# models. Model output is not deterministic across versions and should not gate a PR.
 dependencies = [
     "asyncpg>=0.30.0",
+    "httpx>=0.28.0",
+    "numpy>=2.1.0",
+    "opencv-python-headless>=4.10.0",
     "python-ulid>=3.0.0",
 ]
 
 [project.optional-dependencies]
+ml = [
+    "easyocr>=1.7.2",
+    "faster-whisper>=1.1.0",
+    "librosa>=0.10.2",
+]
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
