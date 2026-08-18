@@ -59,6 +59,7 @@ describe('extractor worker SQL', () => {
       'append_audit',
       'claim_job',
       'complete_job',
+      'enqueue_extract_one',
       'fail_job',
       'fail_job_permanent',
       'heartbeat',

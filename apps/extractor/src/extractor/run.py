@@ -23,6 +23,7 @@ from .config import MissingConfig, Settings
 from .contracts import new_message_id, new_trace_id
 from .features import FEATURE_SCHEMA_VERSION
 from .media import SupabaseMediaStore
+from .sql import statement
 from .store import PostgresJobStore
 from .worker import ExtractWorker
 
@@ -92,21 +93,17 @@ async def _extract_one(settings: Settings, creative_id: str, schema_version: int
     worker = _build_worker(pool, settings)
     try:
         async with pool.acquire() as conn:
-            creative = await conn.fetchrow(
-                "select id, workspace_id from public.creatives where id = $1::uuid", creative_id
-            )
+            # Both statements come from files rather than literals, so the PREPARE harness in
+            # packages/db validates them against the migrated schema like every other one the
+            # worker issues. An operator command that only breaks in production is worse than
+            # no operator command — it is reached precisely when something is already wrong.
+            creative = await conn.fetchrow(statement("load_creative"), creative_id)
             if creative is None:
                 print(f"no creative {creative_id}", file=sys.stderr)
                 return 1
 
             await conn.execute(
-                """insert into public.jobs
-                     (workspace_id, message_id, type, payload, trace_id, actor)
-                   values ($1, $2, 'extract', jsonb_build_object(
-                     'creative_id', $3::uuid, 'schema_version', $4::integer
-                   ), $5, jsonb_build_object(
-                     'type', 'operator', 'id', 'cli', 'label', 'extract-one'
-                   ))""",
+                statement("enqueue_extract_one"),
                 creative["workspace_id"],
                 new_message_id(),
                 creative_id,
