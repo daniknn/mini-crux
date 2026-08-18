@@ -4,8 +4,10 @@ name: CI
 # database tests run against PGlite in-process, so CI proves the tenancy contract without
 # a Supabase project or a Docker service.
 on:
+  # Every PR, not just those into staging/main. DashOne §1 requires the gate on PRs into
+  # those two branches; running it everywhere is a superset, and it closes a real hole —
+  # a stacked PR based on another feature branch would otherwise merge with no CI at all.
   pull_request:
-    branches: [staging, main]
   push:
     branches: [staging, main]
 
