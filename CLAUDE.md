@@ -89,6 +89,17 @@
 - **Never run a tenancy assertion on the default PGlite connection.** It is a superuser, and
   superusers bypass RLS even with `FORCE ROW LEVEL SECURITY`. Always go through
   `asAuthenticated` (`packages/db/src/testing.ts`).
+- **The test database's session timezone must be production's, and it is not by default.**
+  PGlite takes its initial `TimeZone` from the host, so on a laptop in Mexico City it comes up
+  as `Etc/GMT+6` — the market's own offset. Every `... at time zone 'America/Mexico_City'` then
+  returns exactly what the naive cast it exists to replace returns, and the whole class of
+  timezone bugs UC-3 was built to prevent becomes untestable *on the machine most likely to be
+  running the tests*. Measured: `getLatestAnalysis` survived having `instantAsDate('created_at')`
+  swapped for `asDate('created_at')` with its timezone test green, and the same swap fails
+  immediately once the session is UTC. `createTestDb` now runs `set timezone to 'UTC'`, which is
+  what Supabase runs. The general form: **an environment that accidentally matches the value
+  under test is a fixture where two candidate expressions coincide, one level below where you
+  are looking for it.**
 - **Install scripts are opt-in.** New dependencies that want to run code at install time are
   recorded in `allowBuilds` in `pnpm-workspace.yaml`, with a note on why. Never wave one
   through with a CLI flag.

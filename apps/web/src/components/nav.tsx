@@ -6,7 +6,12 @@ import { usePathname } from 'next/navigation'
 import { cn } from '../lib/utils.ts'
 
 /**
- * The four dashboard surfaces.
+ * The five dashboard surfaces, in the order the panel produces them.
+ *
+ * `Análisis` sits after `Estructura` because that is the dependency: structure describes how
+ * one advertiser builds creatives, and analysis is the only surface that relates any of it to
+ * survival. Putting the conclusion ahead of the description invites reading the finding
+ * without the panel it rests on.
  *
  * No workspace appears in any href. The tenant is the active Clerk Organization, read from
  * the session — a route like `/w/:slug/creativos` would let a signed-in user of workspace A
@@ -17,6 +22,7 @@ const LINKS = [
   { href: '/novedades', label: 'Novedades' },
   { href: '/creativos', label: 'Creativos' },
   { href: '/estructura', label: 'Estructura' },
+  { href: '/analisis', label: 'Análisis' },
   { href: '/listas', label: 'Listas' },
 ] as const
 

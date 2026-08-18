@@ -33,6 +33,9 @@ importers:
       '@clerk/nextjs':
         specifier: ^6.9.6
         version: 6.39.6(next@15.5.23(@types/node@22.20.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@mini-crux/analysis':
+        specifier: workspace:*
+        version: link:../../packages/analysis
       '@mini-crux/core':
         specifier: workspace:*
         version: link:../../packages/core
