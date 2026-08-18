@@ -185,7 +185,10 @@ short-lived Vercel functions that would race each other on the same tracking tab
 
 ### Deploy
 
-- [ ] `apps/extractor` image builds in CI
+- [x] `apps/extractor` image builds in CI — after two failures that produced *no log at all*,
+      because PyPI's linux torch is the CUDA build and installing 2.7GB of wheels twice
+      exhausted the runner's disk. Pinning torch to the PyTorch CPU index fixed it at the root:
+      7m17s, green
 - [x] The TS worker image builds in CI — and its first run caught a real defect: `--prod`
       creates no `node_modules` for a package whose dependencies are all dev-only
 - [ ] Migrations run once as the worker's release command against an empty database —
@@ -220,3 +223,12 @@ The severed chain was not visible from the suite because every test called its h
 directly. The general form is worth keeping: **a test that constructs its own caller cannot
 tell you whether a caller exists.** Integration points need a test that starts where
 production starts — here, at the cron tick.
+
+The runbook is the one deliverable with no caller at all, and it shipped wrong: "re-run an
+analysis" told the operator to call `enqueue_daily_analysis` again, which by construction
+returns 0 for a date already analyzed. Every statement in it was afterwards executed against a
+freshly-migrated PGlite — the tick's 1 and its 0, the append-only trigger refusing the delete,
+the manual insert landing, the partial unique index refusing the duplicate. Worth noting that
+the first fixture returned 0 for two reasons at once (no crawl *and* an existing run), so it
+confirmed nothing until a healthy crawl was added. **Prose about SQL is untested code**, and
+it is read for the first time by someone under pressure.
