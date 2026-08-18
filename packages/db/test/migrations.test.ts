@@ -28,7 +28,7 @@ describe('migration runner', () => {
 
     const tables = await db.query<{ table_name: string }>(
       `select table_name from information_schema.tables
-       where table_schema = 'public' order by table_name`,
+       where table_schema = 'public' and table_type = 'BASE TABLE' order by table_name`,
     )
     // An exact list, not a subset: adding a table must be a deliberate edit here. That is
     // the point — a new business table is also a new tenancy surface, and this assertion
@@ -48,6 +48,29 @@ describe('migration runner', () => {
       'workspace_members',
       'workspaces',
     ])
+
+    // Views are listed separately because their tenancy rule is a different one. A table is
+    // safe once it has RLS and a policy; a view has neither of its own and is safe only if
+    // it runs as the caller. Filtering `table_type` above rather than folding views into the
+    // list keeps a new view from looking like a new table and inheriting the wrong review.
+    const views = await db.query<{ table_name: string; is_invoker: boolean }>(
+      `select c.relname as table_name,
+              coalesce(
+                (select option_value = 'true'
+                 from pg_options_to_table(c.reloptions)
+                 where option_name = 'security_invoker'),
+                false
+              ) as is_invoker
+       from pg_class c
+       join pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = 'public' and c.relkind = 'v'
+       order by c.relname`,
+    )
+    expect(views.map((v) => v.table_name)).toEqual(['creative_survival'])
+    // Read out of the live catalog, not out of the migration text. `check-rls-policies.mjs`
+    // greps the SQL; this proves Postgres actually accepted the option, which is what
+    // decides whether the view leaks every workspace's panel to any caller.
+    expect(views.every((v) => v.is_invoker)).toBe(true)
   })
 
   it('is a no-op on the second run (safe to call on every boot)', async () => {

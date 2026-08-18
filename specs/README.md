@@ -20,7 +20,7 @@ starts the day UC-1 lands, and it runs in the background while UC-2 through UC-4
 | [UC-0](UC-0-scaffold-and-contracts.md) | Scaffold and cross-cutting contracts | `done` | — |
 | [UC-1](UC-1-daily-ingestion.md) | Daily Ad Library ingestion → survival panel | `done` | UC-0 |
 | [UC-2](UC-2-feature-extraction.md) | Structural feature extraction from video | `done` | UC-1 |
-| [UC-3](UC-3-survival-panel.md) | Survival derivation with censoring | `todo` | UC-1 |
+| [UC-3](UC-3-survival-panel.md) | Survival derivation with censoring | `done` | UC-1 |
 | [UC-4](UC-4-descriptive-dashboard.md) | Descriptive competitive dashboard (Layer 1) | `todo` | UC-2, UC-3 |
 | [UC-5](UC-5-correlational-analysis.md) | Cohort contrast analysis (Layer 2) | `todo` | UC-3, UC-4 |
 
