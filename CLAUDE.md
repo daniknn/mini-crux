@@ -211,6 +211,15 @@ These are silent. Nothing crashes, the tests stay green, and the survival estima
   shipped value free to drift into reaping every healthy job. When two constants across a
   language boundary have a required relationship, assert it and **read one of them from source**
   rather than copying it.
+- **A periodic mechanism observed once is indistinguishable from a one-shot.** The worker's
+  heartbeat test aged `heartbeat_at` to nine minutes, waited, and asserted it had been reset —
+  and `setInterval` → `setTimeout` survived it. One beat is all a single observation can see,
+  so a worker that goes quiet fifteen seconds into a twenty-minute crawl looked exactly like a
+  healthy one, right up to the reaper requeueing it and the provider being called twice for a
+  day already being collected. **Observe the second occurrence**: reset the precondition and
+  wait again. Applies to anything that repeats — polls, retries, refreshes, cron — because the
+  value of a repeating mechanism is entirely in the repetition, and the first iteration is the
+  one part a broken implementation still gets right.
 
 ## Specs
 

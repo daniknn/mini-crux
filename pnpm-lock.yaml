@@ -98,6 +98,34 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@22.20.1)(vite@8.2.1(@types/node@22.20.1)(jiti@1.21.7))
 
+  apps/worker:
+    dependencies:
+      '@mini-crux/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@mini-crux/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@mini-crux/ingestion':
+        specifier: workspace:*
+        version: link:../../packages/ingestion
+      '@supabase/supabase-js':
+        specifier: ^2.47.10
+        version: 2.112.3
+      pg:
+        specifier: ^8.13.1
+        version: 8.23.0
+    devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.5.5
+        version: 0.5.5
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.21.0
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@types/node@22.20.1)(vite@8.2.1(@types/node@22.20.1)(jiti@1.21.7))
+
   packages/analysis:
     devDependencies:
       vitest:
