@@ -113,6 +113,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@mini-crux/analysis':
+        specifier: workspace:*
+        version: link:../analysis
       '@mini-crux/core':
         specifier: workspace:*
         version: link:../core

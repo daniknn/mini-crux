@@ -51,6 +51,7 @@ export const LATEST_FEATURES = `
            f.cuts_per_second::float8       as cuts_per_second,
            f.text_density::float8          as text_density,
            f.text_in_first_2s,
+           f.audio_energy_variance::float8 as audio_energy_variance,
            f.analysis_cap_s::float8        as analysis_cap_s
     from public.creative_features f
     where f.creative_id = s.creative_id

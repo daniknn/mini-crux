@@ -1,3 +1,4 @@
+import { ANALYSIS_FEATURES } from '@mini-crux/analysis'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { asAuthenticated, createTestDb, seedWorkspace, type TestDb } from '../src/testing.ts'
@@ -255,10 +256,61 @@ describe('analysis schema', () => {
       )
     })
 
+    it('constrains exactly the features the analysis knows how to compute', async () => {
+      // Two lists in two languages that have to agree: `ANALYSIS_FEATURES` decides what the
+      // job measures, this constraint decides what the table will store. A feature added to
+      // one and not the other is either a run that crashes on its own output or a column
+      // nothing ever writes — and neither shows up until someone bumps the feature set.
+      //
+      // Read out of the live catalog rather than grepped from the migration text, so it is
+      // the constraint Postgres actually installed that is being compared.
+      await db.exec('reset role')
+      const [row] = await db.query<{ definition: string }>(
+        `select pg_get_constraintdef(c.oid) as definition
+         from pg_constraint c
+         join pg_class t on t.oid = c.conrelid
+         where t.relname = 'analysis_feature_results' and c.contype = 'c'
+           and pg_get_constraintdef(c.oid) like '%feature%ANY%'`,
+      )
+
+      const allowed = [...(row!.definition.matchAll(/'([a-z0-9_]+)'/g))].map((m) => m[1]!)
+      expect(allowed.sort()).toEqual([...ANALYSIS_FEATURES].sort())
+    })
+
     it('allows one result per feature per run and no more', async () => {
       const runId = await insertRun({ workspaceId: workspaceA, traceId: 'trc_dupe' })
       await insertResult(runId, workspaceA, { feature: 'text_density' })
       await expect(insertResult(runId, workspaceA, { feature: 'text_density' })).rejects.toThrow()
+    })
+
+    it('keeps the four exclusion reasons apart', async () => {
+      // Four distinct values, not four zeroes. Each reason points at a different fix — wait
+      // for the panel to age, fix the crawler, chase the provider, drain the extraction
+      // queue — so a run that collapsed two of them, or wrote them into each other's
+      // columns, would send an operator to work on the wrong thing. A fixture using the
+      // same number for all four would be satisfied by any permutation of them.
+      await db.exec('reset role')
+      const [row] = await db.query<Record<string, number>>(
+        `insert into public.analysis_runs (
+           workspace_id, panel_date, panel_age_days, feature_schema_version,
+           analysis_version, outcome, failed_gate, n_long, n_short,
+           n_excluded_middle, n_excluded_gaps, n_excluded_no_start, n_excluded_not_extracted,
+           trace_id, actor
+         ) values ($1, '2026-08-17'::date, 200, 2, 'uc5.0', 'refused', 'MIN_STRATA',
+                   11, 13, 17, 19, 23, 29, 'trc_excl', '{"type":"schedule"}'::jsonb)
+         returning n_long, n_short, n_excluded_middle, n_excluded_gaps,
+                   n_excluded_no_start, n_excluded_not_extracted`,
+        [workspaceA],
+      )
+
+      expect(row).toEqual({
+        n_long: 11,
+        n_short: 13,
+        n_excluded_middle: 17,
+        n_excluded_gaps: 19,
+        n_excluded_no_start: 23,
+        n_excluded_not_extracted: 29,
+      })
     })
 
     it('allows a null censoring rate, because an empty cohort has no rate', async () => {

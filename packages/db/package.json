@@ -7,6 +7,7 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./analysis": "./src/analysis/index.ts",
     "./dashboard": "./src/dashboard/index.ts",
     "./testing": "./src/testing.ts"
   },
@@ -17,6 +18,7 @@
     "lint": "echo \"(lint: no linter configured yet)\""
   },
   "dependencies": {
+    "@mini-crux/analysis": "workspace:*",
     "@mini-crux/core": "workspace:*",
     "pg": "^8.13.1"
   },

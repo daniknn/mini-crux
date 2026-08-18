@@ -76,6 +76,15 @@ interface StratumStats {
  * wrong — assigning ties their raw positions instead shifts the rank sum by an amount that
  * depends on which group happened to be listed first, so the same data reordered gives a
  * different z.
+ *
+ * `Infinity` is a legal input: `cohorts.ts` encodes "this video never cut" as an infinite
+ * time-to-first-cut, which is ordinally exact. The subtraction comparator handles it —
+ * `Infinity - finite` is `Infinity`, and `Infinity - Infinity` is `NaN`, which `SortCompare`
+ * defines as `+0`, i.e. the two never-cut creatives compare equal and tie, which is what
+ * they should do. Rewriting this as a pair of `<`/`>` comparisons to "make infinities safe"
+ * was tried and reverted: no fixture could tell the two versions apart, because there is
+ * nothing to tell apart. Only ranks reach the statistics below, so an infinite *value*
+ * never enters the arithmetic at all.
  */
 function midranks(values: readonly number[]): number[] {
   const order = values.map((value, index) => ({ value, index })).sort((a, b) => a.value - b.value)

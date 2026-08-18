@@ -75,14 +75,24 @@ create table public.analysis_runs (
   n_long                 integer not null,
   n_short                integer not null,
 
-  -- The three exclusions, counted separately because they mean different things and the
-  -- fix for each is different. `n_excluded_middle` is the ambiguous middle and shrinks as
-  -- the panel ages; `n_excluded_gaps` is creatives whose span crosses a crawl we cannot
-  -- recover; `n_excluded_no_start` is creatives Meta gave no `ad_delivery_start_time` for.
-  -- A single "excluded" total would hide a crawler outage inside a normal-looking number.
-  n_excluded_middle      integer not null default 0,
-  n_excluded_gaps        integer not null default 0,
-  n_excluded_no_start    integer not null default 0,
+  -- The four exclusions, counted separately because they mean different things and the fix
+  -- for each is different. `n_excluded_middle` is the ambiguous middle and shrinks as the
+  -- panel ages; `n_excluded_gaps` is creatives whose span crosses a crawl we cannot
+  -- recover, so it tracks crawler outages; `n_excluded_no_start` is creatives Meta gave no
+  -- `ad_delivery_start_time` for, which is a provider problem; `n_excluded_not_extracted`
+  -- is creatives with no current feature row, which is an extraction backlog and the only
+  -- one of the four an operator can clear by running more jobs.
+  --
+  -- A single "excluded" total would hide a crawler outage inside a normal-looking number,
+  -- and would make a refusal impossible to act on: the operator needs to know whether to
+  -- wait, fix the crawler, or drain the extraction queue.
+  --
+  -- Together with `n_long` and `n_short` these sum to the panel — an invariant asserted on
+  -- the assembly that produces them, in `packages/analysis/test/cohorts.test.ts`.
+  n_excluded_middle        integer not null default 0,
+  n_excluded_gaps          integer not null default 0,
+  n_excluded_no_start      integer not null default 0,
+  n_excluded_not_extracted integer not null default 0,
 
   -- Share of `long_lived` still running. Null when the cohort is empty — 0/0 is not 0, and
   -- writing 0 would report "nothing is still running" for a cohort with no members.
