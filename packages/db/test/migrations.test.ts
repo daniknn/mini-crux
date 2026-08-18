@@ -30,12 +30,20 @@ describe('migration runner', () => {
       `select table_name from information_schema.tables
        where table_schema = 'public' order by table_name`,
     )
+    // An exact list, not a subset: adding a table must be a deliberate edit here. That is
+    // the point — a new business table is also a new tenancy surface, and this assertion
+    // forces someone to look at it alongside `rls.test.ts`.
     expect(tables.map((t) => t.table_name)).toEqual([
+      'advertisers',
       'app_users',
       'audit_events',
+      'crawl_runs',
+      'creative_observations',
+      'creatives',
       'jobs',
       'processed_messages',
       'schema_migrations',
+      'watchlists',
       'workspace_members',
       'workspaces',
     ])

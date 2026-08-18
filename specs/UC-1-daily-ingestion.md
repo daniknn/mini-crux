@@ -1,6 +1,6 @@
 # UC-1 — Daily Ad Library ingestion → survival panel
 
-**Status:** `todo` · **Depends on:** UC-0 · **Blocks:** UC-2, UC-3
+**Status:** `done` · **Depends on:** UC-0 · **Blocks:** UC-2, UC-3
 
 > **This is the highest-priority UC in the project.** Every day it does not run is a day of
 > data permanently lost — the panel cannot be backfilled (`ARCHITECTURE.md` §3). Ship it
@@ -66,16 +66,25 @@ deaths and corrupt the outcome variable.
 
 ## Acceptance criteria
 
-- [ ] Cron tick enqueues exactly one `crawl` job per active watchlist per day
-- [ ] Raw snapshot lands in Storage before any row is parsed; re-running parse against the
-      stored snapshot reproduces identical rows
-- [ ] A creative appearing on day 1 and missing on day 2 has two observations:
+All verified in `packages/ingestion/test/panel.test.ts` against real Postgres (PGlite).
+
+- [x] Cron tick enqueues exactly one `crawl` job per active watchlist per day — enforced by
+      `crawl_runs unique (watchlist_id, run_date)`, so a second tick is a no-op
+- [x] Raw snapshot lands in Storage before any row is parsed; re-running parse against the
+      stored snapshot reproduces identical rows (provider is not called again)
+- [x] A creative appearing on day 1 and missing on day 2 has two observations:
       `is_present = true`, then `is_present = false`
-- [ ] A failed crawl writes `status = 'failed'` and writes **no** observations
-- [ ] A suspect (truncated) crawl writes observations for present creatives but **no** absences
-- [ ] The same creative under two `ad_archive_id`s resolves to one `creatives` row
-- [ ] Re-delivering the same `message_id` produces no duplicate observations
-- [ ] `trace_id` links cron tick → crawl job → snapshot → parsed rows
+- [x] A failed crawl writes `status = 'failed'` and writes **no** observations, and raises a P0
+- [x] A suspect (truncated) crawl writes observations for present creatives but **no** absences
+- [x] The same creative under two `ad_archive_id`s resolves to one `creatives` row, with
+      `variant_count` summed across both
+- [x] Re-delivering the same `message_id` produces no duplicate observations
+- [x] `trace_id` links cron tick → crawl job → snapshot envelope → parsed rows → audit events
+- [ ] **Not verified against live infrastructure.** No Apify token, Supabase project or
+      Doppler config exists yet, so the Apify actor call, Supabase Storage writes and the
+      `pg_cron` schedule have never executed for real. The pipeline is proven end to end
+      against a fixture provider and an in-memory store; the seams that remain unproven are
+      exactly those three.
 
 ## Test plan
 
@@ -97,6 +106,23 @@ psql -c "select observed_at, count(*) filter (where is_present) as present,
 ```
 
 ## Notes
+
+### What the tests caught
+
+The suite passed 17/17 on the first run, which is not evidence of correctness for a panel —
+almost any bug here still produces rows. So each of the three load-bearing rules was verified
+by mutating the source and confirming the *specific* test went red:
+
+| Mutation | Test that failed |
+|---|---|
+| `SUSPECT_VOLUME_RATIO = 0` (suspect guard off) | truncated crawl is suspect, absences withheld |
+| identity hash includes `mediaUrl` | media-URL rotation forks a creative · dedup across ad ids |
+| absence block never runs | disappearance recorded as explicit absence |
+
+The middle one is the dangerous one, and it is why the test exists: Ad Library media URLs are
+signed and rotate between crawls, so keying identity on one would mint a new creative every
+day, cap every ad's observed life at 1 day, and produce a panel that looks populated and is
+entirely wrong. Both failure modes are now guardrails in `CLAUDE.md`.
 
 Seed watchlist for v1 is Mexican fintech — the vertical where the original Ad Library query
 (`q=stori`, `country=MX`) came from. Keep the seed small; crawl reliability matters far more

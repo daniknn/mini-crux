@@ -82,6 +82,26 @@
   recorded in `allowBuilds` in `pnpm-workspace.yaml`, with a note on why. Never wave one
   through with a CLI flag.
 
+## Panel guardrails (the failure modes that corrupt the outcome variable)
+
+These are silent. Nothing crashes, the tests stay green, and the survival estimate is wrong.
+
+- **Never key creative identity on anything that rotates.** Ad Library media URLs are signed
+  and change between crawls. Hashing one mints a fresh creative every day, capping every ad's
+  observed life at 1 day and making the entire panel look like churn. Identity is
+  `(advertiser, normalized copy, media type)` or the media bytes — never a URL, never
+  `first_seen_at`. Covered by *"does not fork a creative when the signed media URL rotates"*.
+- **A truncated crawl must never write absences.** A payload at 10% of yesterday's volume is
+  indistinguishable from a real die-off, so we refuse to guess: the run is marked `suspect`,
+  present creatives are recorded, and every absence is withheld. Writing them would fabricate
+  deaths in the one variable the product exists to measure.
+- **A failed crawl writes no observations at all**, not even absences. "We did not look" and
+  "we looked and it was gone" are different facts; collapsing them turns every outage into a
+  mass extinction event in the data.
+- **Prove a test can fail before trusting it.** Panel tests pass vacuously with alarming ease
+  — a suite that only asserts "rows exist" is satisfied by almost any bug. Each of the three
+  rules above was verified by mutating the source and confirming the specific test went red.
+
 ## Specs
 
 Spec dir: `specs/`. No feature starts without its spec. Index and status: `specs/README.md`.

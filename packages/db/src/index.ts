@@ -3,6 +3,15 @@ import { fileURLToPath } from 'node:url'
 
 import type { SqlExecutor } from './types.ts'
 
+export { appendAuditEvent, findAuditEventsByTrace } from './audit.ts'
+export type { AuditEvent, AuditEventInput } from './audit.ts'
+export { enqueueJob, withIdempotency } from './jobs.ts'
+export type {
+  EnqueueJobInput,
+  EnqueueJobResult,
+  IdempotencyKey,
+  IdempotentResult,
+} from './jobs.ts'
 export { checksum, loadMigrations, runMigrations } from './migrate.ts'
 export type {
   AppliedMigration,
