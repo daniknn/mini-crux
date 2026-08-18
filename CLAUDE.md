@@ -90,6 +90,15 @@
 - **A `CASE` over string literals is type `unknown`.** Assigning one to an enum column is a
   parse error, not an inference — `set status = case … end` fails with `transformAssignedExpr`.
   Cast it explicitly: `(case … end)::public.job_status`. See `app.reap_stalled_jobs` in `0004`.
+- **A view over tenant tables is NOT covered by their RLS policies.** A Postgres view executes
+  with the privileges of its **owner** — here the migration role, which bypasses RLS — so an
+  ordinary view over `creative_observations` returns every workspace's panel to any
+  authenticated caller, while each base table still reports its policy as enabled and every
+  tenancy test on those tables still passes. It looks like a correctly secured system from
+  every angle except an actual cross-workspace query. Every view in `public` **MUST** declare
+  `with (security_invoker = true)`; `scripts/check-rls-policies.mjs` fails the build without
+  it, `migrations.test.ts` re-checks it against the live catalog, and the isolation itself is
+  proved through the view in `survival.test.ts`.
 - **Keep worker SQL in files, not in Python string literals.** `apps/extractor/src/extractor/
   statements/*.sql` is loaded by the worker *and* `PREPARE`d against a freshly-migrated PGlite
   by `packages/db/test/worker-sql.test.ts`. That is the only thing checking the Python worker's
@@ -128,6 +137,23 @@ These are silent. Nothing crashes, the tests stay green, and the survival estima
   is `null` with *no* `skipped_features` entry (a single-shot video genuinely has 0 cuts — it
   belongs in the n). Not-measurable is `null` *with* an entry. Not-attempted is no row at all.
   A feature that zeroes what it could not measure silently moves creatives between cohorts.
+- **Never derive a date by casting a timestamp.** `observed_at::date` applies the *reader's*
+  session timezone, so it is a fact about who is asking, not about the crawl. A crawl at 20:00
+  in Mexico City is 02:00 UTC the next day: the Supabase API (UTC) and an operator's local
+  `psql` then disagree about which day it happened on, and `days_active` differs by one. On the
+  UC-3 fixture the same panel returned 30 days in `America/Mexico_City` and 31 in UTC, with
+  `observation_days` differing too — no error, no warning, just an outcome variable that
+  depends on the connection. `crawl_runs.run_date` is the crawl's logical day in the market,
+  resolved once at write time; **every** date in an analysis derives from it. The single
+  unavoidable cast (Meta's `ad_delivery_start_time`) is pinned to the market's zone so both
+  sides of the subtraction are struck on the same calendar.
+- **A fixture where two candidate expressions coincide tests neither.** UC-3's clean-death
+  panel ended crawling *on* the death day, so `stopped_date` and `last_crawl_date` were equal
+  and `coalesce(stopped_date, last_crawl_date)` could be replaced by the latter with the suite
+  still green. In production the crawler keeps running after an ad dies, and that mutation
+  grows every dead creative's measured lifetime by a day for every day the crawler runs. When a
+  test pins a value that two different implementations both produce, extend the fixture until
+  they diverge.
 - **A constant is untested until something pins it.** `DEFAULT_HEARTBEAT_INTERVAL_S` only means
   something relative to `app.reap_stalled_jobs`' stall window — a number in another language in
   another directory. Tests that pass an explicit override prove the mechanism and leave the
