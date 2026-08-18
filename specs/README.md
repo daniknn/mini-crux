@@ -22,7 +22,7 @@ starts the day UC-1 lands, and it runs in the background while UC-2 through UC-4
 | [UC-2](UC-2-feature-extraction.md) | Structural feature extraction from video | `done` | UC-1 |
 | [UC-3](UC-3-survival-panel.md) | Survival derivation with censoring | `done` | UC-1 |
 | [UC-4](UC-4-descriptive-dashboard.md) | Descriptive competitive dashboard (Layer 1) | `done` | UC-2, UC-3 |
-| [UC-5](UC-5-correlational-analysis.md) | Cohort contrast analysis (Layer 2) | `todo` | UC-3, UC-4 |
+| [UC-5](UC-5-correlational-analysis.md) | Cohort contrast analysis (Layer 2) | `done` | UC-3, UC-4 |
 
 UC-5 is the exception to "the panel needs 8 weeks first". What it ships now is the **gate**: the
 analysis refuses on a thin panel and states how much longer it needs. The engine is built and

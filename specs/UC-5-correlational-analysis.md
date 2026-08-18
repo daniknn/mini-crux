@@ -1,6 +1,6 @@
 # UC-5 — Cohort contrast analysis (Layer 2)
 
-**Status:** `todo` · **Depends on:** UC-3, UC-4
+**Status:** `done` · **Depends on:** UC-3, UC-4
 
 ## Goal
 
@@ -179,35 +179,49 @@ history of what the analysis said on each day is itself the audit trail.
 
 **Statistics**
 
-- [ ] Van Elteren z, p, PS and rank-biserial match reference values computed independently
+- [x] Van Elteren z, p, PS and rank-biserial match reference values computed independently
       (scipy) on the same fixtures, to 6 decimal places
-- [ ] Tie correction is exercised: a fixture with many tied values gives a different variance
+- [x] Tie correction is exercised: a fixture with many tied values gives a different variance
       than the same fixture without, and matches the reference
-- [ ] A stratum present in only one cohort is dropped and counted, not silently weighted
-- [ ] One advertiser with an overwhelming creative count does not determine the pooled result
+- [x] A stratum present in only one cohort is dropped and counted, not silently weighted
+- [x] One advertiser with an overwhelming creative count does not determine the pooled result
       — the same fixture pooled unstratified gives a materially different answer
-- [ ] BH adjustment matches reference q-values, including the monotonicity step-up
+- [x] BH adjustment matches reference q-values, including the monotonicity step-up
 
 **Cohorts**
 
-- [ ] A censored creative with `days_active < 14` lands in the excluded middle, never in
+- [x] A censored creative with `days_active < 14` lands in the excluded middle, never in
       `short_lived`
-- [ ] A censored creative with `days_active > 60` lands in `long_lived`
-- [ ] `has_gaps` and null-`days_active` creatives are excluded and counted
-- [ ] A creative whose feature is in `skipped_features` is dropped from that feature's test
+- [x] A censored creative with `days_active > 60` lands in `long_lived`
+- [x] `has_gaps` and null-`days_active` creatives are excluded and counted
+- [x] A creative whose feature is in `skipped_features` is dropped from that feature's test
       only, and its absence changes that feature's n and no other
 
 **Gating**
 
-- [ ] Each gate refuses on its own, with the shortfall reported
-- [ ] A refused run writes an `analysis_runs` row and zero feature results
-- [ ] A run finding two `feature_schema_version`s fails rather than pooling them
-- [ ] A panel younger than 61 days cannot publish, whatever the ns say
+- [x] Each gate refuses on its own, with the shortfall reported
+- [x] A refused run writes an `analysis_runs` row and zero feature results
+- [x] A run finding two `feature_schema_version`s fails rather than pooling them
+- [x] A panel younger than 61 days cannot publish, whatever the ns say
+
+**Surface**
+
+- [x] The three states are distinct on screen: never run, refused with its shortfall, published
+- [x] A refused run renders the failing gate's number, taken from the stored `gate_detail` and
+      not recomputed against today's panel
+- [x] The unvalidated-proxy and confounder caveats render inside every finding's card, at
+      reading weight — not in a shared footer, not behind a disclosure (rules 4 and 5)
+- [x] No string the copy layer can produce implies performance (rule 7), checked over every
+      feature, every effect direction and every gate at once
+- [x] The within-advertiser qualifier cannot be dropped from the probability of superiority,
+      and the direction is never flipped to keep the number above 50
+- [x] A feature with no result row reads as untested, never as a zero or a null result
+- [x] A contrast above the q threshold is labelled "sin señal" rather than left unmarked
 
 **Tenancy**
 
-- [ ] Both tables carry RLS and are proved isolated through `asAuthenticated`
-- [ ] A run reads only its own workspace's panel
+- [x] Both tables carry RLS and are proved isolated through `asAuthenticated`
+- [x] A run reads only its own workspace's panel
 
 ## Test plan
 
@@ -219,6 +233,21 @@ history of what the analysis said on each day is itself the audit trail.
 | Every gate | one fixture per gate, each failing alone | specific refusal, no results |
 | Mixed versions | rows at v2 and v3 | run fails |
 | Isolation | two workspaces, one panel each | no cross-read |
+| Stale published run | refusal newer than a published run | the refusal renders |
+| Banned vocabulary | every string the copy layer can emit | no performance word |
+
+## What shipped
+
+| Layer | Where | Tests |
+|---|---|---|
+| Statistics | `packages/analysis/src/{van-elteren,fdr,normal}.ts` | `van-elteren.test.ts`, `fdr.test.ts`, `normal.test.ts` |
+| Cohorts & contrast | `packages/analysis/src/{cohorts,contrast}.ts` | `cohorts.test.ts`, `contrast.test.ts` |
+| Gating | `packages/analysis/src/gating.ts` | `gating.test.ts` |
+| Storage | `supabase/migrations/0007_analysis.sql`, `0008` | `analysis-schema.test.ts` |
+| The job | `packages/db/src/analysis/` | `analysis-run.test.ts`, `analysis-panel.test.ts` |
+| The read | `packages/db/src/dashboard/analysis.ts` | `dashboard-analysis.test.ts` |
+| The copy | `apps/web/src/lib/analysis-copy.ts` | `analysis-copy.test.ts` |
+| The page | `apps/web/src/app/(dashboard)/analisis/page.tsx` | — (composition only) |
 
 ## Notes
 
