@@ -11,6 +11,14 @@ import type { SqlExecutor } from './types.ts'
  * IMPORTANT: PGlite connects as a superuser, and superusers bypass RLS unconditionally
  * (even with FORCE ROW LEVEL SECURITY). A tenancy test that forgets {@link asAuthenticated}
  * will pass while proving nothing. Always assert isolation from inside that helper.
+ *
+ * EQUALLY IMPORTANT: the session runs on UTC, set explicitly below. PGlite takes its initial
+ * `TimeZone` from the host, so on a laptop in Mexico City it comes up as `Etc/GMT+6` — the
+ * market's own offset. Every `at time zone 'America/Mexico_City'` in the product then agrees
+ * with the plain cast it exists to replace, and the entire class of timezone bugs UC-3 was
+ * built to prevent becomes untestable on the machine most likely to be running the tests.
+ * Measured: `getLatestAnalysis` survived having its market-calendar conversion replaced by a
+ * naive one, with the timezone test green. Supabase runs UTC; so does this.
  */
 
 export interface TestDb extends SqlExecutor {
@@ -29,6 +37,9 @@ export interface JwtClaims {
 export async function createTestDb(options?: { migrate?: boolean }): Promise<TestDb> {
   const pg = new PGlite()
   await pg.waitReady
+
+  // Production's clock, not the developer's. See the note at the head of this file.
+  await pg.exec("set timezone to 'UTC'")
 
   const db: TestDb = {
     raw: pg,

@@ -1,0 +1,441 @@
+{
+  "vanElteren": [
+    {
+      "name": "single_stratum_no_ties",
+      "why": "One advertiser, every value distinct. The van Elteren weight cancels, so this is a plain Mann-Whitney and scipy pins it exactly.",
+      "strata": [
+        {
+          "stratum": "adv_a",
+          "long": [
+            7.0,
+            9.0,
+            11.0,
+            13.0,
+            15.0,
+            17.0
+          ],
+          "short": [
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            6.0,
+            8.0
+          ]
+        }
+      ],
+      "expected": {
+        "z": 2.7221786146864826,
+        "p": 0.006485307970671342,
+        "t": 4.307692307692308,
+        "expectedT": 3.0,
+        "varianceT": 0.2307692307692308,
+        "probabilitySuperiority": 0.9722222222222221,
+        "rankBiserial": 0.9444444444444442,
+        "nLong": 6,
+        "nShort": 6,
+        "strataUsed": 1,
+        "strataDropped": 0
+      },
+      "scipy": {
+        "u": 35.0,
+        "p": 0.006485307970671366
+      }
+    },
+    {
+      "name": "single_stratum_heavy_ties",
+      "why": "The same shape and the same ns as `single_stratum_no_ties`, with values coarsened so most observations tie. The tie correction must lower the variance; a fixture without a matched untied twin could not tell a correction from its absence.",
+      "strata": [
+        {
+          "stratum": "adv_a",
+          "long": [
+            2.0,
+            2.0,
+            2.0,
+            2.0,
+            3.0,
+            3.0
+          ],
+          "short": [
+            1.0,
+            1.0,
+            2.0,
+            2.0,
+            2.0,
+            2.0
+          ]
+        }
+      ],
+      "expected": {
+        "z": 1.914854215512677,
+        "p": 0.05551109809787095,
+        "t": 3.7692307692307696,
+        "expectedT": 3.0,
+        "varianceT": 0.16137708445400753,
+        "probabilitySuperiority": 0.7777777777777778,
+        "rankBiserial": 0.5555555555555556,
+        "nLong": 6,
+        "nShort": 6,
+        "strataUsed": 1,
+        "strataDropped": 0
+      },
+      "scipy": {
+        "u": 28.0,
+        "p": 0.05551109809787107
+      }
+    },
+    {
+      "name": "three_strata_balanced",
+      "why": "Three advertisers, each contributing to both cohorts. The ordinary published case.",
+      "strata": [
+        {
+          "stratum": "adv_a",
+          "long": [
+            12.0,
+            15.0,
+            9.0,
+            14.0
+          ],
+          "short": [
+            4.0,
+            7.0,
+            3.0,
+            11.0
+          ]
+        },
+        {
+          "stratum": "adv_b",
+          "long": [
+            22.0,
+            19.0,
+            25.0
+          ],
+          "short": [
+            18.0,
+            20.0,
+            13.0
+          ]
+        },
+        {
+          "stratum": "adv_c",
+          "long": [
+            5.5,
+            6.5,
+            8.5,
+            4.5,
+            9.5
+          ],
+          "short": [
+            6.0,
+            2.5,
+            7.5
+          ]
+        }
+      ],
+      "expected": {
+        "z": 2.477640502746537,
+        "p": 0.013225432554242508,
+        "t": 7.555555555555555,
+        "expectedT": 6.0,
+        "varianceT": 0.3941798941798942,
+        "probabilitySuperiority": 0.836050724637681,
+        "rankBiserial": 0.6721014492753621,
+        "nLong": 12,
+        "nShort": 10,
+        "strataUsed": 3,
+        "strataDropped": 0
+      },
+      "scipy": null
+    },
+    {
+      "name": "dominant_advertiser",
+      "why": "One advertiser with ten times the creatives of the others and no within-advertiser contrast at all \u2014 its cohorts are drawn from the same values. The small advertisers all run *lower* on the feature when long-lived. Pooling reads the big advertiser's house style as a finding and flips the sign; stratifying does not.",
+      "strata": [
+        {
+          "stratum": "adv_big",
+          "long": [
+            80.0,
+            82.0,
+            84.0,
+            86.0,
+            88.0,
+            90.0,
+            92.0,
+            94.0,
+            96.0,
+            98.0,
+            81.0,
+            83.0,
+            85.0,
+            87.0,
+            89.0,
+            91.0,
+            93.0,
+            95.0,
+            97.0,
+            99.0,
+            80.5,
+            82.5,
+            84.5,
+            86.5,
+            88.5,
+            90.5,
+            92.5,
+            94.5,
+            96.5,
+            98.5,
+            81.5,
+            83.5,
+            85.5,
+            87.5,
+            89.5
+          ],
+          "short": [
+            80.2,
+            84.2,
+            88.2,
+            92.2,
+            96.2
+          ]
+        },
+        {
+          "stratum": "adv_s1",
+          "long": [
+            1.0,
+            2.0,
+            3.0,
+            4.0
+          ],
+          "short": [
+            10.0,
+            11.0,
+            12.0,
+            13.0
+          ]
+        },
+        {
+          "stratum": "adv_s2",
+          "long": [
+            1.5,
+            2.5,
+            3.5,
+            4.5
+          ],
+          "short": [
+            10.5,
+            11.5,
+            12.5,
+            13.5
+          ]
+        },
+        {
+          "stratum": "adv_s3",
+          "long": [
+            1.2,
+            2.2,
+            3.2,
+            4.2
+          ],
+          "short": [
+            10.2,
+            11.2,
+            12.2,
+            13.2
+          ]
+        }
+      ],
+      "expected": {
+        "z": -2.8039372283459425,
+        "p": 0.005048273250582631,
+        "t": 20.991869918699187,
+        "expectedT": 23.5,
+        "varianceT": 0.8001355013550135,
+        "probabilitySuperiority": 0.03662337662337662,
+        "rankBiserial": -0.9267532467532468,
+        "nLong": 47,
+        "nShort": 17,
+        "strataUsed": 4,
+        "strataDropped": 0
+      },
+      "scipy": null,
+      "pooled": {
+        "z": 1.7404679956112379,
+        "p": 0.08177687505868236,
+        "t": 25.261538461538464,
+        "expectedT": 23.5,
+        "varianceT": 1.0243589743589743,
+        "probabilitySuperiority": 0.6433041301627034,
+        "rankBiserial": 0.28660826032540676,
+        "nLong": 47,
+        "nShort": 17,
+        "strataUsed": 1,
+        "strataDropped": 0
+      }
+    },
+    {
+      "name": "single_cohort_strata_dropped",
+      "why": "Two advertisers land entirely in one cohort. They must be dropped and counted, and the result must equal the same run with those advertisers absent \u2014 on a thin panel this is the common shape, and silently keeping them reports a confident number computed from one advertiser.",
+      "strata": [
+        {
+          "stratum": "adv_a",
+          "long": [
+            12.0,
+            15.0,
+            9.0,
+            14.0
+          ],
+          "short": [
+            4.0,
+            7.0,
+            3.0,
+            11.0
+          ]
+        },
+        {
+          "stratum": "adv_long_only",
+          "long": [
+            30.0,
+            31.0,
+            32.0
+          ],
+          "short": []
+        },
+        {
+          "stratum": "adv_short_only",
+          "long": [],
+          "short": [
+            1.0,
+            2.0
+          ]
+        }
+      ],
+      "expected": {
+        "z": 2.02072594216369,
+        "p": 0.04330814281079198,
+        "t": 2.7777777777777777,
+        "expectedT": 2.0,
+        "varianceT": 0.14814814814814814,
+        "probabilitySuperiority": 0.9375,
+        "rankBiserial": 0.875,
+        "nLong": 4,
+        "nShort": 4,
+        "strataUsed": 1,
+        "strataDropped": 2
+      },
+      "scipy": {
+        "u": 15.0,
+        "p": 0.043308142810791955
+      }
+    }
+  ],
+  "benjaminiHochberg": [
+    {
+      "name": "monotonicity_step_up",
+      "why": "Raw q = p\u00b7m/i is non-monotone here (i=3 gives 0.078, i=5 gives 0.0504), so the step-up from the largest p downward is what produces the answer. Without it, feature 3 reports a q larger than feature 5's despite a smaller p.",
+      "p": [
+        0.001,
+        0.008,
+        0.039,
+        0.041,
+        0.042,
+        0.6
+      ],
+      "q": [
+        0.006,
+        0.024,
+        0.0504,
+        0.0504,
+        0.0504,
+        0.6
+      ]
+    },
+    {
+      "name": "unsorted_input",
+      "why": "The same p-values shuffled. BH sorts internally and must hand results back in the caller's order \u2014 a mismatch here attaches every q to the wrong feature name.",
+      "p": [
+        0.042,
+        0.001,
+        0.6,
+        0.039,
+        0.008,
+        0.041
+      ],
+      "q": [
+        0.0504,
+        0.006,
+        0.6,
+        0.0504,
+        0.024,
+        0.0504
+      ]
+    },
+    {
+      "name": "large_p_values",
+      "why": "Raw p\u00b7m/i runs past 1 here (0.4\u00b74/1 = 1.6), and the step-up brings every value back down to the largest p. No clamp is needed and none is present: max(q) equals max(p) exactly.",
+      "p": [
+        0.4,
+        0.7,
+        0.9,
+        0.95
+      ],
+      "q": [
+        0.95,
+        0.95,
+        0.95,
+        0.95
+      ]
+    },
+    {
+      "name": "single_test",
+      "why": "m = 1: BH is the identity.",
+      "p": [
+        0.031
+      ],
+      "q": [
+        0.031
+      ]
+    }
+  ],
+  "normalTail": [
+    {
+      "z": 0.0,
+      "p": 1.0
+    },
+    {
+      "z": 0.5,
+      "p": 0.6170750774519738
+    },
+    {
+      "z": -0.5,
+      "p": 0.6170750774519738
+    },
+    {
+      "z": 1.959963984540054,
+      "p": 0.049999999999999996
+    },
+    {
+      "z": 2.7221793990985197,
+      "p": 0.006485292576117284
+    },
+    {
+      "z": -2.803937,
+      "p": 0.005048276825845661
+    },
+    {
+      "z": 3.5,
+      "p": 0.00046525815807105003
+    },
+    {
+      "z": 5.0,
+      "p": 5.733031437583869e-07
+    },
+    {
+      "z": -6.5,
+      "p": 8.032001167718175e-11
+    },
+    {
+      "z": 8.0,
+      "p": 1.244192114854348e-15
+    }
+  ]
+}

@@ -65,6 +65,34 @@ def media_path(workspace_id: str, creative_hash: str, media_url: str, media_type
     return posixpath.join(workspace_id, f"{safe_hash}{_extension(media_url, media_type)}")
 
 
+def poster_path(media_path_value: str, schema_version: int) -> str:
+    """`{media path without extension}.poster.v{n}.jpg`, beside the media it was cut from.
+
+    Versioned because the poster is a product of a definition set, exactly like every other
+    column on the row (see migration 0006). A fixed path would also collide with the
+    write-once contract on the very operation that needs to replace it — a schema bump
+    re-extracts, and `put` refuses to overwrite.
+    """
+    path = PurePosixPath(media_path_value)
+    stem = str(path.with_suffix("")) if path.suffix else media_path_value
+    return f"{stem}.poster.v{schema_version}.jpg"
+
+
+def land_poster(store: MediaStore, path: str, data: bytes) -> str:
+    """Store the poster JPEG, tolerating the object already being there.
+
+    Two workers can hold the same creative — a reaped job that was in fact still healthy is
+    the ordinary way it happens — and they encode the same frame to the same key. The
+    second one losing the race is not an error: the bytes it would have written are the
+    bytes already there, because the poster is deterministic for a given schema version.
+    """
+    try:
+        store.put(path, data, content_type="image/jpeg")
+    except MediaExistsError:
+        pass
+    return path
+
+
 def _extension(media_url: str, media_type: str) -> str:
     suffix = PurePosixPath(urlparse(media_url).path).suffix.lower()
     # Guard against a query-string artefact or a path with no extension masquerading as

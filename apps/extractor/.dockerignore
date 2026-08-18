@@ -1,0 +1,17 @@
+# A second ignore file, and it is not redundant with the root one.
+#
+# Docker reads `.dockerignore` from the *build context* root, and this app's context is
+# this directory (`docker build -f apps/extractor/Dockerfile apps/extractor`) — so the root
+# file is never consulted for this image. Without this one, every build uploads the host's
+# `.venv`: 164MB of macOS-linked wheels that could never run in a Linux image, sent over the
+# daemon socket on every rebuild.
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+
+# Never in an image (UC-6 rule 6). Secrets are injected by Fly from Doppler.
+.env
+.env.*
+!.env.example
