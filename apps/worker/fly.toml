@@ -1,0 +1,59 @@
+# The TypeScript worker on Fly.io.
+#
+#   fly deploy --config apps/worker/fly.toml
+#
+# NO SECRETS HERE (UC-6 rule 6). Doppler is the only source; the Doppler↔Fly integration
+# syncs them in as Fly secrets, and this file names none of them. Anything under `[env]` is
+# baked into the image metadata and readable by anyone who can pull it, so only values that
+# would be safe on a billboard belong there.
+
+app = "mini-crux-worker"
+primary_region = "qro"          # Querétaro — nearest region to the market we crawl.
+
+[build]
+  dockerfile = "Dockerfile"
+
+# ── migrations ───────────────────────────────────────────────────────────────
+# DashOne §3: applied automatically, never by hand. A release command runs once per deploy,
+# on a temporary machine, *before* any new machine serves — and a non-zero exit aborts the
+# deploy, leaving the previous release running. That ordering is the whole point: a
+# migration that fails must stop the code that depends on it from shipping, not race it.
+#
+# Deliberately not in `main.ts`: the worker can be scaled to two machines on a bad day, and
+# two processes racing the same tracking table is how a half-applied migration happens. It
+# is equally not on the web app, which is many short-lived Vercel functions — the same
+# race, with more runners.
+[deploy]
+  release_command = "node apps/worker/src/migrate-cli.ts"
+  # A rolling restart would leave the old worker claiming jobs while the new one starts, on
+  # the same queue with two different code versions. `immediate` stops the old one first;
+  # SIGTERM lets the job in flight finish and report, so the handover costs nothing.
+  strategy = "immediate"
+
+[env]
+  # Not a secret: how often the loop asks for work. Two seconds is well inside the
+  # five-minute stall window, so a claimed job is heartbeated long before the reaper
+  # notices it.
+  JOB_POLL_INTERVAL_MS = "2000"
+
+# ── machines ─────────────────────────────────────────────────────────────────
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  # Exactly one. The queue tolerates more — `app.claim_job` uses `for update skip locked`,
+  # so N workers never claim the same row — but one watchlist crawled once a day does not
+  # need two, and a second machine doubles the Supabase connections for no throughput.
+  # Raise this when the queue actually backs up, which `jobs.status = 'pending'` will show.
+  processes = ["app"]
+
+[processes]
+  app = "node apps/worker/src/main.ts"
+
+# No `[[services]]` and no `[http_service]`. This process listens on no port by design, so
+# there is nothing to route to it and nothing for Fly to health-check. Declaring a service
+# would make Fly wait for a TCP handshake that never comes and mark every deploy failed.
+#
+# `auto_stop_machines` is likewise absent, and must stay absent: a worker that scales to
+# zero has nothing to wake it, because jobs arrive from pg_cron writing a row — not from an
+# HTTP request Fly can observe. It would stop after the first idle period and never crawl
+# again, silently, which is precisely the failure `/api/health/ingestion` exists to catch.

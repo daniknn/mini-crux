@@ -28,6 +28,8 @@ from .features import (
     MIN_CUT_GAP_S,
     OCR_MAX_FRAMES,
     OCR_SAMPLE_INTERVAL_S,
+    POSTER_JPEG_QUALITY,
+    POSTER_MAX_WIDTH,
 )
 
 
@@ -192,6 +194,41 @@ def analyze(path: Path, cap_s: float) -> VideoAnalysis:
         analyzed_s=analyzed_s if analyzed_s > 0 else media_probe.duration_s,
         truncated=truncated,
     )
+
+
+def nearest_frame(frames: list[tuple[float, Any]], target_s: float) -> tuple[float, Any]:
+    """The retained frame closest to `target_s`.
+
+    The poster is cut from the frames `analyze` already kept for OCR rather than from a
+    second decode pass. Re-opening the file to seek one frame would double the decode cost
+    of the cheapest stage, and — worse — `CAP_PROP_POS_MSEC` seeking lands on the nearest
+    *keyframe* in several of the codecs the Ad Library serves, so the frame it returned
+    would not be the timestamp we asked for anyway. The retained samples are 0.5s apart, so
+    the answer is within a quarter-second of the target and is a frame we know decoded.
+
+    Ties go to the earlier frame: `min` is stable, and a deterministic poster is what makes
+    a re-extraction at the same schema version produce the same bytes.
+    """
+    if not frames:
+        raise UnreadableMedia("no frames retained to cut a poster from")
+    return min(frames, key=lambda item: abs(item[0] - target_s))
+
+
+def encode_poster(frame: Any) -> bytes:
+    """Downscale to `POSTER_MAX_WIDTH` and encode as JPEG."""
+    height, width = frame.shape[:2]
+    if width > POSTER_MAX_WIDTH:
+        scale = POSTER_MAX_WIDTH / width
+        frame = cv2.resize(
+            frame,
+            (POSTER_MAX_WIDTH, max(1, int(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), POSTER_JPEG_QUALITY])
+    if not ok:
+        raise UnreadableMedia("could not encode poster frame as JPEG")
+    return bytes(buffer.tobytes())
 
 
 def read_image(path: Path) -> Any:

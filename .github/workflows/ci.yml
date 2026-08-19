@@ -102,11 +102,67 @@ jobs:
       # is not optional in production — torch, easyocr and faster-whisper are what actually
       # runs on Fly.io — so auditing the installed set would gate the dependencies that
       # never leave CI while ignoring the ones that do. Exporting resolves metadata without
-      # downloading ~2GB of wheels, so the extra coverage costs nothing.
+      # downloading the wheels at all, so the extra coverage costs nothing.
+      #
+      # The `sed` strips torch's `+cpu` local version identifier, and it is load-bearing on
+      # Linux — which is to say, here and nowhere else. `pyproject.toml` pins torch to the
+      # PyTorch CPU index on Linux, so the export reads `torch==2.13.0+cpu`, and PyPI has no
+      # such release to look up: pip-audit fails to resolve it and `--strict` (correctly)
+      # fails the build rather than skipping it silently. `2.13.0+cpu` and `2.13.0` are the
+      # same upstream release built without the CUDA payload, and advisories are filed
+      # against the release, so auditing the plain version audits exactly this code under
+      # the name the advisory database knows it by.
+      #
+      # `--no-hashes` follows from the same edit: a hash pins the CPU wheel, which is not the
+      # artifact the stripped version names. Integrity is `uv.lock`'s job — this step's job
+      # is CVEs.
       - name: Audit dependencies
         run: |
-          uv export --all-extras --no-emit-project --format requirements-txt \
+          uv export --all-extras --no-emit-project --no-hashes --format requirements-txt \
+            | sed -E 's/^(torch|torchvision)==([0-9][0-9a-z.]*)\+cpu/\1==\2/' \
             | uv run --with pip-audit pip-audit --strict -r /dev/stdin
+
+  # UC-6 rule 7: every image MUST build in CI. A Dockerfile first built during an incident
+  # is not a deploy artifact — it is a second problem discovered at the worst moment.
+  #
+  # Build only, never push. CI has no registry credentials and needs none: the question
+  # being answered is "does this still build", and Fly builds its own image on `fly deploy`
+  # from the same file. Pushing would add a secret to the gate for no extra guarantee.
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      # Both images always report, rather than the extractor's long torch download hiding
+      # a one-line syntax error in the worker's.
+      fail-fast: false
+      matrix:
+        include:
+          # Root context: a pnpm workspace cannot be built from a leaf, because the
+          # lockfile and the sibling packages live above it.
+          - name: worker
+            context: .
+            dockerfile: apps/worker/Dockerfile
+          # Self-contained uv project — CLAUDE.md keeps Python to this directory.
+          - name: extractor
+            context: apps/extractor
+            dockerfile: apps/extractor/Dockerfile
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.name }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          # GitHub's own layer cache. Without it every PR re-downloads torch, and a
+          # 20-minute image job is one people learn to ignore.
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
   secret-hygiene:
     runs-on: ubuntu-latest

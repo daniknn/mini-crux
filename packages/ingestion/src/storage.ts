@@ -62,20 +62,58 @@ export function snapshotPath(input: {
   return `raw/${input.workspaceId}/${input.watchlistId}/${input.runDate}/${input.crawlRunId}.json`
 }
 
-export async function putSnapshot(
-  store: ObjectStore,
-  path: string,
-  envelope: SnapshotEnvelope,
-): Promise<void> {
+/**
+ * Generic over the envelope shape so a second crawl kind (UC-7's ES validation crawl, which
+ * has no `watchlist_id` or `crawl_run_id` to carry) can land raw through the same write-once
+ * mechanism with its own envelope, rather than forcing an envelope with fields that do not
+ * apply to it — see {@link ProxyValidationSnapshotEnvelope}.
+ */
+export async function putSnapshot<T>(store: ObjectStore, path: string, envelope: T): Promise<void> {
   await store.put(path, JSON.stringify(envelope))
 }
 
-export async function getSnapshot(
+export async function getSnapshot<T = SnapshotEnvelope>(
   store: ObjectStore,
   path: string,
-): Promise<SnapshotEnvelope | null> {
+): Promise<T | null> {
   const body = await store.get(path)
-  return body === null ? null : (JSON.parse(body) as SnapshotEnvelope)
+  return body === null ? null : (JSON.parse(body) as T)
+}
+
+/**
+ * The ES validation crawl's envelope (UC-7). Deliberately not {@link SnapshotEnvelope}: there
+ * is no `watchlist_id` or `crawl_run_id` in the quarantined corpus, and reusing the MX shape
+ * with those fields set to a placeholder would be exactly the kind of accidental coupling the
+ * quarantine (migration 0011's header) exists to prevent.
+ */
+export interface ProxyValidationSnapshotEnvelope {
+  schema_version: number
+  trace_id: TraceId
+  actor: Actor
+  workspace_id: string
+  /**
+   * The crawl job's own `message_id`, not a `proxy_validation_runs` row id. That table is
+   * append-only and its row is only inserted once the regression over the whole corpus has
+   * been computed — there is nothing to reference yet at the moment this snapshot lands.
+   * `message_id` is available up front, unique per job invocation, and stable across a
+   * redelivery of the *same* job, which is exactly what a write-once path needs.
+   */
+  run_id: string
+  provider: string
+  provider_run_id: string | null
+  captured_at: string
+  payload: unknown
+}
+
+/**
+ * `raw/{workspace}/proxy-validation/{run_id}.json`, where `run_id` is the crawl job's
+ * `message_id` (see {@link ProxyValidationSnapshotEnvelope.run_id}). No watchlist or date
+ * component — the ES corpus is not a daily longitudinal panel (spec: "in the EU,
+ * longitudinal data *can* be backfilled"), so there is no crawl-day directory structure to
+ * mirror.
+ */
+export function proxyValidationSnapshotPath(input: { workspaceId: string; runId: string }): string {
+  return `raw/${input.workspaceId}/proxy-validation/${input.runId}.json`
 }
 
 /** In-memory store for tests and for `crawl:once --dry-run`. */
