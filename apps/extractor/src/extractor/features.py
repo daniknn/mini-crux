@@ -22,7 +22,12 @@ from typing import Any
 
 # Bump this whenever any threshold below changes, or a feature is added or removed.
 # `app.mark_features_stale()` then marks prior rows stale and the reconciler re-extracts.
-FEATURE_SCHEMA_VERSION = 1
+#
+# v2 adds the poster frame (UC-4). v3 adds semantic frame sampling (UC-8): three JPEGs cut
+# from the same decode pass, gating app.enqueue_pending_semantic_tags. Same reasoning both
+# times — the bump is not ceremony, it is the only mechanism that back-fills a column that
+# did not exist when older rows were written, by re-reading the media UC-2 landed immutably.
+FEATURE_SCHEMA_VERSION = 3
 
 # --- Cut detection -----------------------------------------------------------------
 # Frames are converted to grayscale and downscaled before differencing, so the threshold
@@ -55,6 +60,23 @@ OCR_MIN_CONFIDENCE = 0.4
 # extraction cost; a long ad should get sparser sampling, not a longer job.
 OCR_MAX_FRAMES = 60
 
+# --- Semantic frames -----------------------------------------------------------------
+# Three targets cut from the same OCR-sampled frame pool `video.analyze()` already
+# retains (spec rule 1: no second video read). The hook target mirrors the "@0.5s" the UC-8
+# spec names literally; midpoint and near-end are computed from `analyzed_s` in the
+# pipeline, so only the one fixed timestamp needs a name here.
+SEMANTIC_HOOK_FRAME_S = 0.5
+
+# --- Poster frame ------------------------------------------------------------------
+# Where in the ad to cut the gallery thumbnail from, when there is no detected cut to
+# halve. Not t=0: the first frame of an Ad Library re-encode is very often black or a
+# platform chrome card, and a gallery of black squares is a gallery of nothing.
+POSTER_FALLBACK_S = 1.0
+# The poster is a thumbnail in a three-column grid, never a full-bleed hero. Storing the
+# source resolution would multiply the media bucket for pixels no surface renders.
+POSTER_MAX_WIDTH = 640
+POSTER_JPEG_QUALITY = 82
+
 # --- Audio -------------------------------------------------------------------------
 AUDIO_SAMPLE_RATE = 22050
 # librosa RMS framing. These are librosa's own defaults, restated here because they are
@@ -75,10 +97,14 @@ DEFINITIONS: dict[str, Any] = {
     "cut_frame_width": CUT_FRAME_WIDTH,
     "cut_sample_fps": CUT_SAMPLE_FPS,
     "min_cut_gap_s": MIN_CUT_GAP_S,
+    "semantic_hook_frame_s": SEMANTIC_HOOK_FRAME_S,
     "hook_window_s": HOOK_WINDOW_S,
     "ocr_sample_interval_s": OCR_SAMPLE_INTERVAL_S,
     "ocr_min_confidence": OCR_MIN_CONFIDENCE,
     "ocr_max_frames": OCR_MAX_FRAMES,
+    "poster_fallback_s": POSTER_FALLBACK_S,
+    "poster_max_width": POSTER_MAX_WIDTH,
+    "poster_jpeg_quality": POSTER_JPEG_QUALITY,
     "audio_sample_rate": AUDIO_SAMPLE_RATE,
     "audio_frame_length": AUDIO_FRAME_LENGTH,
     "audio_hop_length": AUDIO_HOP_LENGTH,
@@ -109,6 +135,8 @@ MEASURABLE_FEATURES = (
     "first_line_transcript",
     "full_transcript",
     "audio_energy_variance",
+    "poster_storage_path",
+    "semantic_frame_paths",
 )
 
 
@@ -130,11 +158,30 @@ class CreativeFeatures:
     first_line_transcript: str | None = None
     full_transcript: str | None = None
     audio_energy_variance: float | None = None
+    #: Storage key of the poster, filled in by the worker once the JPEG is uploaded. The
+    #: pipeline cannot set it: extraction runs on a temp file and knows nothing about
+    #: buckets, and a path recorded for an object that failed to upload is a broken image
+    #: in the gallery with a non-null column swearing there is one.
+    poster_storage_path: str | None = None
+    #: Storage keys of the three sampled JPEGs (hook, midpoint, near-end), filled in by the
+    #: worker once all three are uploaded — same two-phase discipline as the poster, and for
+    #: the same reason: a path recorded before the upload succeeds is a broken image the
+    #: schema would otherwise call fine.
+    semantic_frame_paths: list[str] | None = None
 
     analysis_cap_s: float | None = None
     truncated: bool = False
     skipped_features: list[str] = field(default_factory=list)
     schema_version: int = FEATURE_SCHEMA_VERSION
+
+    #: The encoded poster, in transit between the pipeline and the upload. Excluded from
+    #: `to_row()` — it is the payload the column points at, not a column.
+    poster_jpeg: bytes | None = field(default=None, metadata={"row": False})
+    #: The three encoded semantic frames, in transit. Same transit discipline as
+    #: `poster_jpeg`, and the same reason it is a list rather than three named fields: the
+    #: pipeline produces them together from one frame pool and the worker uploads them
+    #: together, so there is never a reason to address one independently of the others.
+    semantic_frame_jpegs: list[bytes] | None = field(default=None, metadata={"row": False})
 
     def skip(self, *names: str) -> None:
         """Record that a feature could not be measured, without failing the extraction."""
@@ -145,4 +192,8 @@ class CreativeFeatures:
                 self.skipped_features.append(name)
 
     def to_row(self) -> dict[str, Any]:
-        return {f.name: getattr(self, f.name) for f in fields(self)}
+        return {
+            f.name: getattr(self, f.name)
+            for f in fields(self)
+            if f.metadata.get("row", True)
+        }

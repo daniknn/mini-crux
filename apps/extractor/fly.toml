@@ -1,0 +1,42 @@
+# The Python extractor on Fly.io.
+#
+#   fly deploy --config apps/extractor/fly.toml
+#
+# NO SECRETS HERE (UC-6 rule 6). Doppler syncs them in as Fly secrets; nothing below names
+# a credential.
+
+app = "mini-crux-extractor"
+primary_region = "qro"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# No `[deploy] release_command`. Migrations belong to exactly one app, and that app is the
+# TS worker — two release commands racing the same tracking table on a deploy that touches
+# both is the failure the single owner exists to prevent. This app reads a schema the other
+# app applied.
+
+[env]
+  JOB_POLL_INTERVAL_MS = "2000"
+  # `tiny` is the deliberate default: Spanish transcription accurate enough to measure
+  # *whether and how much* a creative speaks, which is the structural signal this product
+  # correlates. A larger model buys transcript quality the analysis never reads, at several
+  # times the memory. Both values are visible here rather than hidden in code because they
+  # are the two an operator would actually reach for.
+  WHISPER_MODEL = "tiny"
+  EXTRACTOR_MAX_VIDEO_SECONDS = "120"
+
+[[vm]]
+  # 2GB, not 512mb like the TS worker. torch, easyocr and a whisper model are resident for
+  # the length of an extraction, and an OOM kill here is worse than slow: the machine dies
+  # holding a claimed job, and the row stays `running` until the reaper finds it.
+  size = "shared-cpu-2x"
+  memory = "2gb"
+  processes = ["app"]
+
+[processes]
+  app = "python -m extractor.run --serve"
+
+# No services, and no `auto_stop_machines` — same reasoning as the TS worker. Work arrives
+# as a row in `jobs`, which Fly cannot observe, so a machine that scales to zero has nothing
+# to wake it.

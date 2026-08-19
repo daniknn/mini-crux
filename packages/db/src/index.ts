@@ -12,7 +12,39 @@ export type {
   IdempotencyKey,
   IdempotentResult,
 } from './jobs.ts'
+export {
+  fetchIngestionHealth,
+  getIngestionHealth,
+  summarizeIngestionHealth,
+} from './health.ts'
+export type {
+  IngestionHealthRow,
+  IngestionHealthSummary,
+  IngestionOffenceReason,
+  IngestionOffender,
+  IngestionState,
+  RestCredentials,
+  SummarizeOptions,
+} from './health.ts'
 export { checksum, loadMigrations, runMigrations } from './migrate.ts'
+export {
+  deactivateWorkspace,
+  postAuditEvent,
+  provisionWorkspace,
+  resolveSlug,
+  RestError,
+  slugify,
+} from './workspaces.ts'
+export type {
+  DeactivationResult,
+  ProvisionResult,
+  RestAuditEventInput,
+  SlugSource,
+  WorkspaceRow,
+  WorkspaceUpsertInput,
+} from './workspaces.ts'
+export { currentWorkspaceId, MissingTenantClaimsError, withTenant } from './tenant.ts'
+export type { TenantClaims } from './tenant.ts'
 export type {
   AppliedMigration,
   Logger,
