@@ -25,6 +25,7 @@ export const publicEnv = {
 
 export function serverEnv(): {
   clerkSecretKey: string
+  clerkWebhookSecret: string
   supabaseUrl: string
   supabaseServiceRoleKey: string
   databaseUrl: string
@@ -32,6 +33,10 @@ export function serverEnv(): {
 } {
   return {
     clerkSecretKey: required('CLERK_SECRET_KEY'),
+    // Signs the organization webhook. `required` rather than optional for the same reason
+    // as the health token: the failure mode of a default is an endpoint that accepts
+    // unsigned requests, and this one writes the row every RLS policy resolves against.
+    clerkWebhookSecret: required('CLERK_WEBHOOK_SECRET'),
     supabaseUrl: required('SUPABASE_URL'),
     supabaseServiceRoleKey: required('SUPABASE_SERVICE_ROLE_KEY'),
     // The ingestion alarm's only credential. It is a shared secret rather than a Clerk

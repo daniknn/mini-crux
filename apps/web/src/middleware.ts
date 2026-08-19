@@ -18,6 +18,12 @@ const isPublicRoute = createRouteMatcher([
   // a shared secret inside the handler. Letting Clerk bounce it first would make the alarm
   // permanently red for a reason that has nothing to do with ingestion.
   '/api/health/ingestion',
+  // Same sense of "public": the caller is Clerk itself and holds no session, so the session
+  // gate cannot apply. The Svix signature is the gate, and it runs before anything in the
+  // handler reads the body. Leaving this out would have Clerk bounced to the sign-in page,
+  // every delivery answered 200-with-HTML, and no workspace ever provisioned — the exact
+  // silent-empty-dashboard failure this route exists to prevent.
+  '/api/webhooks/clerk',
 ])
 
 export default clerkMiddleware(async (auth, request) => {

@@ -51,6 +51,9 @@ const PLACEHOLDERS: Record<string, string> = {
   '<id>': '00000000-0000-0000-0000-000000000001',
   '<workspace-uuid>': '00000000-0000-0000-0000-000000000002',
   '<your-name>': 'operator',
+  // A Clerk organization id, which is `text` rather than a uuid — the shape matters to the
+  // operator reading the section, not to parse analysis.
+  '<new-clerk-org-id>': 'org_2abcDEFghiJKLmno',
 }
 
 interface SqlBlock {
@@ -208,6 +211,9 @@ describe('runbook SQL', () => {
       '5. Common operations #7',
       '5. Common operations #8',
       '5. Common operations #9',
+      '5. Common operations #10',
+      '5. Common operations #11',
+      '5. Common operations #12',
     ])
   })
 

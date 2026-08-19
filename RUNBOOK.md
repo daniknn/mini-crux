@@ -204,7 +204,40 @@ absent from the web app's environment entirely.
    fly deploy --config apps/extractor/fly.toml
    ```
 4. **Web.** Vercel, root directory `apps/web`.
-5. **Uptime checker** pointed at `/api/health/ingestion` with the bearer token.
+5. **The Clerk organization webhook**, below — before anyone signs up, not after. Clerk does
+   not replay events from before an endpoint existed, so every organization created in the gap
+   has no workspace and no way to notice.
+6. **Uptime checker** pointed at `/api/health/ingestion` with the bearer token.
+
+### The Clerk organization webhook
+
+`workspaces.clerk_org_id` is what `app.current_workspace_id()` resolves against, and therefore
+what every RLS policy in the product resolves against. It is written by exactly one thing: a
+`POST /api/webhooks/clerk` from Clerk.
+
+Configure it in the Clerk dashboard → **Webhooks** → **Add Endpoint**:
+
+- **URL** `https://<your-domain>/api/webhooks/clerk`
+- **Events** `organization.created`, `organization.updated`, `organization.deleted`. Nothing
+  else — other event types are answered `200 {"outcome":"ignored"}` and cost a delivery each.
+- Copy the **Signing Secret** (`whsec_…`) and:
+  ```bash
+  doppler secrets set CLERK_WEBHOOK_SECRET=whsec_...
+  ```
+  then **redeploy Vercel** — server env vars bind at build time (§4, *Rotating one*).
+
+The route is listed in `middleware.ts`'s public matcher, which means only that Clerk's *session*
+gate does not apply: the caller is Clerk and holds no session. The Svix signature is the gate,
+and it is checked before anything reads the body. Without the secret set, `serverEnv()` throws
+and every delivery is answered `500` — deliberately, so Clerk retries and the queued deliveries
+land once the secret is there, rather than being lost while the endpoint answers a cheerful 200.
+
+**The failure this prevents, and why it is worth a section.** A workspace that was never
+provisioned does not produce an error anywhere. The session is valid, the `org_id` claim is
+real, `app.current_workspace_id()` returns null, every policy evaluates against null, and every
+query returns zero rows. The dashboard renders empty. Nothing appears in the browser console, in
+the Vercel logs, or in `audit_events` — appending to which needs a `workspace_id` too. The first
+signal is a customer saying the product looks broken.
 
 ### Migrations
 
@@ -464,6 +497,61 @@ on the same row is the untouched provider payload (land raw, parse later, domain
 to a model response) — the first place to look when a parsed field looks wrong, since a
 reprocess against that column costs nothing further, unlike a second VLM call.
 
+**"They signed up and the dashboard is empty."** First question, always: does the workspace
+exist at all? This is the whole tenancy chain in one read.
+```sql
+select w.slug, w.clerk_org_id, count(wl.id) filter (where wl.is_active) as active_watchlists
+from public.workspaces w
+left join public.watchlists wl on wl.workspace_id = w.id
+group by w.id, w.slug, w.clerk_org_id
+order by w.created_at;
+```
+Match `clerk_org_id` against the organization id in the Clerk dashboard. **No row for their org
+is the provisioning failure, not a data problem** — check the endpoint's delivery log in Clerk
+(§4) before looking at anything else. A row with `active_watchlists = 0` is the opposite
+situation: provisioning worked and nobody has created a watchlist yet, so there is genuinely
+nothing to show and the fix is onboarding, not operations.
+
+**Provision an organization that predates the webhook.** Do not write the row by hand. Change
+anything about the organization in Clerk — its name is enough — and the resulting
+`organization.updated` provisions it through exactly the same path a new signup takes; the route
+handles created and updated identically for this reason. Clerk's **Resend** on a past delivery
+works too, when there is one to resend. The reason this is worth stating rather than offering an
+`insert`: `clerk_org_id` has to match Clerk's id exactly, and a typo does not fail loudly. It
+creates a workspace that no session ever resolves to, so the customer keeps seeing the empty
+dashboard while the table now says they were provisioned — the original symptom, with the
+evidence against it.
+
+**Read what the webhook did to one workspace.** Every branch that wrote something appended here,
+on the same `trace_id` the delivery was answered with:
+```sql
+select created_at, type, trace_id, actor, payload
+from public.audit_events
+where workspace_id = '<workspace-uuid>' and type like 'workspace.%'
+order by created_at;
+```
+Expect exactly one `workspace.provisioned`. A redelivery appends nothing — the route reads
+before it writes and an unchanged delivery is silent all the way down — so two of them means two
+distinct provisionings, not a retry.
+
+**Reattach a workspace after an organization was deleted in Clerk.** `organization.deleted`
+deactivates the workspace's watchlists and deletes nothing: every table cascades from
+`workspaces`, and the Ad Library has no history (§6), so honouring that cascade would spend weeks
+of un-recrawlable panel on two clicks in a settings page we do not own. The panel is intact and
+the spending has stopped.
+
+Clerk does not reuse organization ids, so there is no undelete. A re-created organization is a
+new tenant with a new id, and the old panel is reachable only by pointing the existing workspace
+at it — copy the new id from Clerk, then:
+```sql
+update public.workspaces set clerk_org_id = '<new-clerk-org-id>' where id = '<workspace-uuid>';
+update public.watchlists set is_active = true where workspace_id = '<workspace-uuid>';
+```
+This is the one column in the product whose edit changes *who can see the panel*, so read it back
+against Clerk before telling anyone it is fixed. Reactivate the watchlists only if someone can
+now sign in to that organization: an active watchlist bills Apify every morning whether or not a
+person can read the result.
+
 ---
 
 ## 6. What cannot be recovered
@@ -496,3 +584,13 @@ next day's crawl.
 - **`creative_semantic_tags.is_stale = true` rows sitting around after a taxonomy bump.** They
   are superseded, not orphaned — kept for audit, same as `creative_features.is_stale`. They stop
   once `enqueue_pending_semantic_tags` finishes the backlog for the new version.
+- **A workspace row still there after its Clerk organization was deleted, with every watchlist
+  `is_active = false`.** That is the whole design (§5): the spending stops, the panel stays. A
+  cascade here is the one deletion in the product that cannot be undone by any amount of money.
+- **`200 {"outcome":"unknown-organization"}` in the Clerk delivery log.** A delete for an
+  organization that was never provisioned. Answering 4xx would have Clerk retry it forever and
+  eventually disable the endpoint every future signup depends on, to fix nothing.
+- **`200 {"outcome":"unchanged"}` on deliveries that clearly carried a name.** Svix redelivers,
+  and a redelivery that wrote nothing is reporting accurately. The alternative — an upsert — is
+  idempotent in the row but not in an append-only log, where a second `workspace.provisioned` is
+  not a duplicate write but a false claim that something happened twice.

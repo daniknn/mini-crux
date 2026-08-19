@@ -27,6 +27,22 @@ export type {
   SummarizeOptions,
 } from './health.ts'
 export { checksum, loadMigrations, runMigrations } from './migrate.ts'
+export {
+  deactivateWorkspace,
+  postAuditEvent,
+  provisionWorkspace,
+  resolveSlug,
+  RestError,
+  slugify,
+} from './workspaces.ts'
+export type {
+  DeactivationResult,
+  ProvisionResult,
+  RestAuditEventInput,
+  SlugSource,
+  WorkspaceRow,
+  WorkspaceUpsertInput,
+} from './workspaces.ts'
 export { currentWorkspaceId, MissingTenantClaimsError, withTenant } from './tenant.ts'
 export type { TenantClaims } from './tenant.ts'
 export type {

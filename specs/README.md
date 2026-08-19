@@ -26,6 +26,7 @@ starts the day UC-1 lands, and it runs in the background while UC-2 through UC-4
 | [UC-6](UC-6-go-live.md) | Go live: closing the loop between the tick and the panel | `done` | UC-1, UC-2, UC-5 |
 | [UC-7](UC-7-proxy-validation.md) | Validating the survival proxy against real delivery | `done` | UC-1, UC-3, UC-5, UC-6 |
 | [UC-8](UC-8-semantic-tagging.md) | Semantic tagging via VLM (hook type, people on screen, tone) | `done` | UC-2, UC-5 |
+| [UC-9](UC-9-workspace-provisioning.md) | Workspace provisioning from Clerk | `done` | UC-0 |
 
 UC-6 is the one that makes the sequencing rationale above true rather than aspirational. The
 daily tick has been enqueueing `crawl` jobs that no process consumes, so the clock that was
@@ -47,6 +48,13 @@ structural features only. It adds one boolean feature (`has_people_on_screen`) t
 existing contrast engine and two categorical tags (`hook_type`, `tone`) shown descriptively —
 see `specs/UC-8-semantic-tagging.md` for why the categorical tags are not run through a
 hypothesis test in v1.
+
+UC-9 breaks the numbering's own logic, and deliberately: it depends only on UC-0 and should
+have shipped with it. Migration `0001` has said since day one that the tenant is
+"synced by the Clerk webhook" — and no such webhook was ever written, so nothing creates the
+`workspaces` row every RLS policy in the product resolves against. It surfaced while working
+out what a first deploy actually needs, which is the only reason it is numbered last rather
+than first. Nothing else in the list can be *used* until it lands.
 
 ## Closing ritual
 
