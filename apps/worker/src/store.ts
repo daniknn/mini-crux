@@ -19,7 +19,7 @@ import type { SqlExecutor } from '@mini-crux/db'
  */
 
 /** Types this worker answers to. `extract` belongs to the Python worker and is not claimed. */
-export const JOB_TYPES = ['crawl', 'parse', 'analysis'] as const
+export const JOB_TYPES = ['crawl', 'parse', 'analysis', 'proxy_validation'] as const
 
 export type JobType = (typeof JOB_TYPES)[number]
 

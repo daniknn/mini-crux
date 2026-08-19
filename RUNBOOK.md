@@ -13,7 +13,7 @@ amount of later work reconstructs it. Every urgency in this document derives fro
 
 | Piece | Platform | What it does | Owns migrations |
 |---|---|---|---|
-| `mini-crux-worker` | Fly.io (`qro`) | Claims `crawl`, `parse`, `analysis` jobs | **Yes** — release command |
+| `mini-crux-worker` | Fly.io (`qro`) | Claims `crawl`, `parse`, `analysis`, `proxy_validation` jobs | **Yes** — release command |
 | `mini-crux-extractor` | Fly.io (`qro`) | Claims `extract` jobs (video features) | No |
 | `@mini-crux/web` | Vercel (`qro1`) | Dashboard + `/api/health/ingestion` | No |
 | Postgres + `pg_cron` | Supabase | The clock and the data | — |
@@ -36,6 +36,11 @@ The two-hour gap between crawl and analysis is sized by how long the crawl and e
 take, not by the analysis, which is milliseconds of arithmetic. If the crawl has not
 succeeded by 16:00 the analysis tick enqueues nothing and yesterday's published run stands
 — correct behaviour, not a missed window.
+
+`proxy_validation` (UC-7) is deliberately **absent** from this table. In the EU, longitudinal
+data can be backfilled from one scrape — there is no daily tick to backfill for, and adding one
+would imply this is a panel to maintain rather than a research instrument to run once in a
+while. See *Run the ES proxy validation* in §5.
 
 ```sql
 select jobname, schedule, active from cron.job order by jobname;
@@ -375,6 +380,33 @@ select id, type, status, created_at from public.jobs where trace_id = 'trc_…';
 ```sql
 select type, status, count(*) from public.jobs group by 1, 2 order by 1, 2;
 ```
+
+**Run the ES proxy validation (UC-7).** A research instrument, triggered deliberately — never
+by cron (see §1). It crawls Spain, classifies and gates the corpus, and stores a
+`proxy_validation_runs` row in one call:
+```bash
+fly ssh console -a mini-crux-worker \
+  -C "node /app/packages/ingestion/src/proxy-validation-cli.ts \
+      --workspace <workspace-uuid> --kind keyword --query <term>"
+```
+No `jobs` row backs this — it runs in-process, like `crawl:once` — so it never appears in the
+*Queue depth* query above. A re-run corrects the existing corpus in place (upserted on
+`workspace_id, ad_archive_id`) rather than duplicating it; the acceptance criterion is that a
+second crawl of the same query does not double the corpus.
+
+**Read the last ES validation verdict:**
+```sql
+select id, created_at, outcome, failed_gate, beta, beta_ci_low, beta_ci_high, verdict
+from public.proxy_validation_runs
+where workspace_id = '<workspace-uuid>'
+order by created_at desc limit 5;
+```
+`proxy_validation_ads` and `proxy_validation_runs` never join to `creatives`,
+`creative_observations`, `creative_survival`, `advertisers`, `watchlists` or `crawl_runs` — in
+either direction (migration 0011). If a query needs one of those tables to make sense, it is
+asking about the MX panel and belongs in a different section. The verdict changes what the
+`/validacion-proxy` page *says*, never what UC-5 computes: no MX gate, threshold or copy reads
+it automatically, and none should be made to.
 
 ---
 

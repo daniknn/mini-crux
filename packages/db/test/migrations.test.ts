@@ -45,6 +45,8 @@ describe('migration runner', () => {
       'creatives',
       'jobs',
       'processed_messages',
+      'proxy_validation_ads',
+      'proxy_validation_runs',
       'schema_migrations',
       'watchlists',
       'workspace_members',

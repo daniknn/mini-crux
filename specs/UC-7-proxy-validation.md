@@ -1,6 +1,6 @@
 # UC-7 — Validating the survival proxy against real delivery
 
-**Status:** `in-progress` · **Depends on:** UC-1, UC-3, UC-5, UC-6 · **Blocks:** nothing
+**Status:** `done` · **Depends on:** UC-1, UC-3, UC-5, UC-6 · **Blocks:** nothing
 
 ## Goal
 

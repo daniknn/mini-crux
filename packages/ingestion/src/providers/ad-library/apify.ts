@@ -132,7 +132,12 @@ export function normalizeAd(item: unknown): AdLibraryAd | null {
     pageId: firstString(record, ['pageId', 'page_id']) ?? firstString(snapshot, ['page_id']) ?? '',
     pageName:
       firstString(record, ['pageName', 'page_name']) ?? firstString(snapshot, ['page_name']) ?? '',
-    adDeliveryStartTime: normalizeStartTime(record),
+    adDeliveryStartTime: normalizeTimestamp(
+      record['adDeliveryStartTime'] ??
+        record['ad_delivery_start_time'] ??
+        record['startDate'] ??
+        record['start_date'],
+    ),
     mediaType: normalizeMediaType(record, snapshot),
     mediaUrl: normalizeMediaUrl(snapshot),
     adCopy: normalizeAdCopy(record, snapshot),
@@ -140,24 +145,78 @@ export function normalizeAd(item: unknown): AdLibraryAd | null {
       record['publisherPlatform'] ?? record['publisher_platform'] ?? record['publisherPlatforms'],
     ),
     variantCount: normalizeVariantCount(record),
+    // EU-only (UC-7). Absent on every MX dataset item, so these come back `undefined` there
+    // — never coerced to `null`, which would read as "Meta reported no stop time" rather
+    // than "this field does not apply to this market" (see AdLibraryAd's own doc comment).
+    ...normalizeEuFields(record),
   }
 }
 
-function normalizeStartTime(record: Record<string, unknown>): string | null {
-  const value =
-    record['adDeliveryStartTime'] ??
-    record['ad_delivery_start_time'] ??
-    record['startDate'] ??
-    record['start_date']
-
+/**
+ * Coerce one timestamp field. Shared by start and stop time because both come from Meta in
+ * the same two shapes (epoch seconds or an ISO string) and must fail the same way.
+ */
+function normalizeTimestamp(value: unknown): string | null {
   if (typeof value === 'number') {
     // Meta reports epoch seconds; JS Date wants milliseconds. Getting this wrong dates
-    // every ad to 1970 and silently destroys the survival start.
+    // every ad to 1970 and silently destroys the survival start (or, for a stop time,
+    // makes every ad look like it ended before it began).
     return new Date(value * 1000).toISOString()
   }
   if (typeof value === 'string' && value !== '') {
     const parsed = new Date(value)
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
+  }
+  return null
+}
+
+/**
+ * The EU-only fields (UC-7). Returns an empty object — not `{ field: undefined }` for each
+ * one — on a dataset item that carries none of them, so `AdLibraryAd`'s optional fields stay
+ * genuinely absent (`in` returns false) on every ordinary MX item rather than present-but-
+ * undefined, which `JSON.stringify` and `structuredClone` would treat differently.
+ */
+function normalizeEuFields(
+  record: Record<string, unknown>,
+): Pick<AdLibraryAd, 'adDeliveryStopTime' | 'euTotalReachMin' | 'euTotalReachMax'> | object {
+  const stopValue =
+    record['adDeliveryStopTime'] ?? record['ad_delivery_stop_time'] ?? record['endDate'] ?? record['end_date']
+  const reach = record['euTotalReach'] ?? record['eu_total_reach']
+
+  const hasStop = stopValue !== undefined
+  const hasReach = reach !== undefined
+  if (!hasStop && !hasReach) return {}
+
+  const out: Pick<AdLibraryAd, 'adDeliveryStopTime' | 'euTotalReachMin' | 'euTotalReachMax'> = {}
+  if (hasStop) out.adDeliveryStopTime = normalizeTimestamp(stopValue)
+  if (hasReach) {
+    const [min, max] = normalizeReachRange(reach)
+    out.euTotalReachMin = min
+    out.euTotalReachMax = max
+  }
+  return out
+}
+
+/**
+ * Meta reports EU reach as a bucketed range (spec rule 7: never collapsed to a midpoint).
+ * Tolerant of the shapes a marketplace actor might hand back: a `{lower_bound, upper_bound}`
+ * object, snake or camel case, or occasionally a single point value with no range at all —
+ * in which case both bounds are set to it rather than guessing a spread.
+ */
+function normalizeReachRange(value: unknown): [number | null, number | null] {
+  if (isRecord(value)) {
+    const min = firstNumber(value, ['lower_bound', 'lowerBound', 'min', 'eu_total_reach_min'])
+    const max = firstNumber(value, ['upper_bound', 'upperBound', 'max', 'eu_total_reach_max'])
+    if (min !== null || max !== null) return [min, max]
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return [value, value]
+  return [null, null]
+}
+
+function firstNumber(record: Record<string, unknown>, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
   }
   return null
 }

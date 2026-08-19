@@ -1,3 +1,5 @@
+import { newTraceId, operatorActor } from '@mini-crux/core'
+import { enqueueJob } from '@mini-crux/db'
 import { createTestDb, seedWorkspace } from '@mini-crux/db/testing'
 import type { TestDb } from '@mini-crux/db/testing'
 import { createFixtureProvider, createMemoryStore, fixtureAd } from '@mini-crux/ingestion'
@@ -259,6 +261,109 @@ describe('the analysis tick → worker → analysis_runs', () => {
 
     const runs = await db.query<{ n: number }>(
       'select count(*)::int as n from public.analysis_runs where workspace_id = $1',
+      [workspaceId],
+    )
+    expect(runs[0]!.n).toBe(1)
+  })
+})
+
+describe('proxy validation job → worker → proxy_validation_runs (UC-7)', () => {
+  // A crawl-and-parse day never touches this corpus (quarantine, migration 0011), so the
+  // wiring proof here does not reuse `workerWith`'s watchlist-derived setup — the job is
+  // enqueued by hand, exactly as `proxy-validation:once` enqueues nothing and calls
+  // `runProxyValidation` directly, and exactly as an operator triggers it in production.
+  const ES_ADS: AdLibraryAd[] = [
+    fixtureAd({
+      adArchiveId: 'es_ad_1',
+      pageId: 'page_es_1',
+      pageName: 'Moda ES 1',
+      adDeliveryStartTime: '2026-01-01T00:00:00.000Z',
+      adDeliveryStopTime: '2026-01-10T00:00:00.000Z',
+      euTotalReachMin: 1000,
+      euTotalReachMax: 2000,
+    }),
+    fixtureAd({
+      adArchiveId: 'es_ad_2',
+      pageId: 'page_es_2',
+      pageName: 'Moda ES 2',
+      adDeliveryStartTime: '2026-01-01T00:00:00.000Z',
+      adDeliveryStopTime: '2026-01-15T00:00:00.000Z',
+      euTotalReachMin: 500,
+      euTotalReachMax: 1500,
+    }),
+  ]
+
+  async function enqueueProxyValidation(): Promise<string> {
+    const { jobId } = await enqueueJob(db, {
+      workspaceId,
+      type: 'proxy_validation',
+      traceId: newTraceId(),
+      actor: operatorActor('user_acme', 'chain-test'),
+      payload: { kind: 'keyword', query: 'moda' },
+    })
+    return jobId
+  }
+
+  it('runs the ES crawl off a manually enqueued job and records a run row', async () => {
+    // Two ads is nowhere near the gate's >= 30 finished / >= 5 advertisers, so this proves
+    // the chain — enqueue, claim, dispatch, crawl, land, upsert, classify, gate, store — is
+    // connected, the same way the analysis chain test above uses a one-day panel's correct
+    // refusal rather than assembling a corpus large enough to publish.
+    const jobId = await enqueueProxyValidation()
+    const worker = workerWith([{ ads: ES_ADS }])
+
+    expect(await drain(worker)).toBe(1)
+
+    const jobRow = await db.query<{ status: string }>(
+      `select status::text as status from public.jobs where id = $1`,
+      [jobId],
+    )
+    expect(jobRow[0]!.status).toBe('succeeded')
+
+    const runs = await db.query<{
+      outcome: string
+      failed_gate: string | null
+      corpus_size: number
+    }>(
+      `select outcome::text as outcome, failed_gate::text as failed_gate, corpus_size
+       from public.proxy_validation_runs where workspace_id = $1`,
+      [workspaceId],
+    )
+    expect(runs).toHaveLength(1)
+    expect(runs[0]!.outcome).toBe('refused')
+    expect(runs[0]!.failed_gate).not.toBeNull()
+    expect(runs[0]!.corpus_size).toBe(2)
+
+    const corpus = await db.query<{ n: number }>(
+      `select count(*)::int as n from public.proxy_validation_ads where workspace_id = $1`,
+      [workspaceId],
+    )
+    expect(corpus[0]!.n).toBe(2)
+  })
+
+  it('does not double the corpus or the run history when the job is redelivered', async () => {
+    // Mirrors "does not re-crawl a day it has already landed" above: a reaper-requeued job
+    // is ordinary, and the same guarantees — write-once snapshot, upsert-keyed corpus,
+    // idempotency-ledgered run insert — must hold here even though nothing in this UC has a
+    // `crawl_runs.status` column to lean on.
+    await enqueueProxyValidation()
+    const worker = workerWith([{ ads: ES_ADS }])
+    await drain(worker)
+
+    await db.query(
+      `update public.jobs set status = 'pending', run_after = now(), finished_at = null
+       where type = 'proxy_validation'`,
+    )
+    await drain(worker)
+
+    const corpus = await db.query<{ n: number }>(
+      `select count(*)::int as n from public.proxy_validation_ads where workspace_id = $1`,
+      [workspaceId],
+    )
+    expect(corpus[0]!.n).toBe(2)
+
+    const runs = await db.query<{ n: number }>(
+      `select count(*)::int as n from public.proxy_validation_runs where workspace_id = $1`,
       [workspaceId],
     )
     expect(runs[0]!.n).toBe(1)

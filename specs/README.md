@@ -24,7 +24,7 @@ starts the day UC-1 lands, and it runs in the background while UC-2 through UC-4
 | [UC-4](UC-4-descriptive-dashboard.md) | Descriptive competitive dashboard (Layer 1) | `done` | UC-2, UC-3 |
 | [UC-5](UC-5-correlational-analysis.md) | Cohort contrast analysis (Layer 2) | `done` | UC-3, UC-4 |
 | [UC-6](UC-6-go-live.md) | Go live: closing the loop between the tick and the panel | `done` | UC-1, UC-2, UC-5 |
-| [UC-7](UC-7-proxy-validation.md) | Validating the survival proxy against real delivery | `in-progress` | UC-1, UC-3, UC-5, UC-6 |
+| [UC-7](UC-7-proxy-validation.md) | Validating the survival proxy against real delivery | `done` | UC-1, UC-3, UC-5, UC-6 |
 
 UC-6 is the one that makes the sequencing rationale above true rather than aspirational. The
 daily tick has been enqueueing `crawl` jobs that no process consumes, so the clock that was

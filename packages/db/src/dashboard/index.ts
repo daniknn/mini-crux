@@ -37,6 +37,9 @@ export type {
 export { getPanelHealth } from './panel.ts'
 export type { PanelHealth } from './panel.ts'
 
+export { getLatestProxyValidation } from './proxy-validation.ts'
+export type { LatestProxyValidation } from './proxy-validation.ts'
+
 export { getStructuralProfile } from './structure.ts'
 export type {
   MetricDistribution,

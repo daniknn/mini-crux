@@ -204,6 +204,7 @@ describe('runbook SQL', () => {
       '5. Common operations #3',
       '5. Common operations #4',
       '5. Common operations #5',
+      '5. Common operations #6',
     ])
   })
 

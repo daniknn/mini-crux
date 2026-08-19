@@ -48,6 +48,16 @@ export interface AdLibraryAd {
   publisherPlatforms: string[]
   /** How many variants Meta reports behind this archive id. Absent means one. */
   variantCount: number
+  /**
+   * EU Ad Library fields, present only when the query's `country` is an EU market under the
+   * DSA (UC-7). Meta never reports these for Mexican ads (ARCHITECTURE.md §3) — that absence
+   * is precisely what UC-7 exists to work around using a market where they are published.
+   * `undefined` on every MX ad; `null` on an ES ad Meta has not (yet) reported the field for.
+   */
+  adDeliveryStopTime?: string | null
+  /** Meta reports EU reach as a bucketed range, never a point value — both bounds or neither. */
+  euTotalReachMin?: number | null
+  euTotalReachMax?: number | null
 }
 
 export interface CrawlResult {

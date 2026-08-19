@@ -97,7 +97,13 @@ function stubHandlers(overrides: Partial<Handlers> = {}): {
       seen.push(job)
     }
   return {
-    handlers: { crawl: record(), parse: record(), analysis: record(), ...overrides },
+    handlers: {
+      crawl: record(),
+      parse: record(),
+      analysis: record(),
+      proxy_validation: record(),
+      ...overrides,
+    },
     seen,
   }
 }
@@ -134,6 +140,7 @@ describe('claiming and dispatch', () => {
     await enqueue('crawl')
     await enqueue('parse')
     await enqueue('analysis')
+    await enqueue('proxy_validation')
 
     const dispatched: string[] = []
     const tag =
@@ -141,11 +148,16 @@ describe('claiming and dispatch', () => {
       async () => {
         dispatched.push(name)
       }
-    const worker = workerFor({ crawl: tag('crawl'), parse: tag('parse'), analysis: tag('analysis') })
+    const worker = workerFor({
+      crawl: tag('crawl'),
+      parse: tag('parse'),
+      analysis: tag('analysis'),
+      proxy_validation: tag('proxy_validation'),
+    })
 
     while (await worker.runOnce());
 
-    expect(dispatched.sort()).toEqual(['analysis', 'crawl', 'parse'])
+    expect(dispatched.sort()).toEqual(['analysis', 'crawl', 'parse', 'proxy_validation'])
   })
 
   it('returns false and touches nothing when the queue is empty', async () => {
