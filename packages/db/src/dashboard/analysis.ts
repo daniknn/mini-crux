@@ -1,4 +1,12 @@
-import { ANALYSIS_FEATURES, type AnalysisFeature, type GateId } from '@mini-crux/analysis'
+import {
+  ANALYSIS_FEATURES,
+  HOOK_TYPES,
+  TONES,
+  type AnalysisFeature,
+  type DescriptiveTag,
+  type GateId,
+  type TagBreakdown,
+} from '@mini-crux/analysis'
 
 import { asDate, instantAsDate } from './internal.ts'
 import type { SqlExecutor } from '../types.ts'
@@ -71,6 +79,13 @@ export interface LatestAnalysis {
    * in migration 0007 refuses to store a result against a run that did not publish.
    */
   features: AnalysisFeatureResult[]
+  /**
+   * `hook_type` then `tone`, each a caption, never a claim — no p-value, no q-value, nothing
+   * `vanElteren` produced (UC-8 spec §6). Empty for a refused run for the same reason
+   * {@link features} is: migration 0014 attaches the same `assert_run_published` guard 0007
+   * put on the statistical results.
+   */
+  tagBreakdowns: readonly TagBreakdown[]
 }
 
 interface RunRow {
@@ -107,6 +122,47 @@ interface ResultRow {
   rank_biserial: number
   strata_used: number
   strata_dropped: number
+}
+
+interface TagResultRow {
+  tag: DescriptiveTag
+  value: string
+  n_long: number
+  n_short: number
+}
+
+const TAXONOMY: Readonly<Record<DescriptiveTag, readonly string[]>> = {
+  hook_type: HOOK_TYPES,
+  tone: TONES,
+}
+
+/**
+ * Rows for one tag back into the shape {@link describeTagDistribution} produced when the job
+ * wrote them — a read-side mirror, not a recomputation. `untagged` is its own taxonomy row in
+ * the table (migration 0014) and is pulled back out into the dedicated fields here so the
+ * surface reads the same {@link TagBreakdown} shape whether it came fresh off the job or back
+ * off the database.
+ */
+function toBreakdown(tag: DescriptiveTag, rows: readonly TagResultRow[]): TagBreakdown {
+  const byValue = new Map(rows.map((r) => [r.value, r]))
+  const untagged = byValue.get('untagged')
+
+  const counts = TAXONOMY[tag].map((value) => {
+    const row = byValue.get(value)
+    return { value, nLong: row?.n_long ?? 0, nShort: row?.n_short ?? 0 }
+  })
+
+  const untaggedLong = untagged?.n_long ?? 0
+  const untaggedShort = untagged?.n_short ?? 0
+
+  return {
+    tag,
+    counts,
+    untaggedLong,
+    untaggedShort,
+    nLong: counts.reduce((s, c) => s + c.nLong, 0) + untaggedLong,
+    nShort: counts.reduce((s, c) => s + c.nShort, 0) + untaggedShort,
+  }
 }
 
 /**
@@ -160,6 +216,27 @@ export async function getLatestAnalysis(db: SqlExecutor): Promise<LatestAnalysis
 
   const byFeature = new Map(results.map((r) => [r.feature, r]))
 
+  const tagRows = await db.query<TagResultRow>(
+    `select tag, value, n_long, n_short
+     from public.analysis_tag_results
+     where analysis_run_id = $1`,
+    [run.id],
+  )
+  const byTag = new Map<DescriptiveTag, TagResultRow[]>()
+  for (const row of tagRows) {
+    const bucket = byTag.get(row.tag)
+    if (bucket) bucket.push(row)
+    else byTag.set(row.tag, [row])
+  }
+  // Empty exactly when the run was refused — migration 0014 attaches the same
+  // `assert_run_published` trigger 0007 put on `analysis_feature_results`, so no row for
+  // either tag can exist under a refused run. hook_type then tone, always both, on a
+  // published one: the job writes every taxonomy value for both (see run.ts).
+  const tagBreakdowns: TagBreakdown[] =
+    tagRows.length === 0
+      ? []
+      : (['hook_type', 'tone'] as const).map((tag) => toBreakdown(tag, byTag.get(tag) ?? []))
+
   return {
     runId: run.id,
     runDate: run.run_date,
@@ -207,5 +284,6 @@ export async function getLatestAnalysis(db: SqlExecutor): Promise<LatestAnalysis
         },
       ]
     }),
+    tagBreakdowns,
   }
 }

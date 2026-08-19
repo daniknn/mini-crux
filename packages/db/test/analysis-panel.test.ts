@@ -138,6 +138,10 @@ describe('analysis panel', () => {
     await add('short-stopped', zapatos, '2026-03-05T12:00:00Z', [5, 6], [7], measured())
     await add('short-censored', zapatos, '2026-03-08T12:00:00Z', [8, 9, 10], [], measured())
     await add('long-censored', zapatos, '2025-12-01T12:00:00Z', all10(), [], measured())
+    // The one creative in this fixture that was actually tagged (UC-8), so the join and its
+    // `::int` cast are proved against a real true, not only against the absence every other
+    // row exercises below.
+    await addSemanticTag(workspaceA, ids['long-censored']!, true)
     await add('long-stopped', tenis, '2025-12-15T12:00:00Z', [1, 2, 3], [4], measured())
     await add('middle', zapatos, '2026-02-01T12:00:00Z', all10(), [], measured())
     await add('no-start', zapatos, null, all10(), [], measured())
@@ -274,6 +278,19 @@ describe('analysis panel', () => {
     )
   }
 
+  async function addSemanticTag(
+    ws: string,
+    creativeId: string,
+    hasPeopleOnScreen: boolean,
+  ): Promise<void> {
+    await db.query(
+      `insert into public.creative_semantic_tags
+         (workspace_id, creative_id, schema_version, has_people_on_screen)
+       values ($1, $2, 1, $3)`,
+      [ws, creativeId, hasPeopleOnScreen],
+    )
+  }
+
   // ────────────────────────────── the read ──────────────────────────────
 
   it('returns every creative in the workspace panel, deterministically ordered', () => {
@@ -325,23 +342,32 @@ describe('analysis panel', () => {
       text_in_first_2s: 1,
       text_density: 0.25,
       audio_energy_variance: 0.031,
+      // UC-8: `long-censored` is the one fixture creative actually tagged (see
+      // `addSemanticTag` below) — a real Postgres `true` arrives here as `1`, the same
+      // driver-decoding discipline as `text_in_first_2s`, and by a second, independently-
+      // versioned join at that (`LATEST_SEMANTIC_TAGS`, not `LATEST_FEATURES`).
+      has_people_on_screen: 1,
     })
     expect(row('long-censored').featureSchemaVersion).toBe(FEATURE_VERSION)
     expect(row('long-censored').skippedFeatures).toEqual([])
   })
 
   it('keeps the three kinds of null apart across the driver boundary', () => {
-    // Not measurable: null *and* named in skipped_features.
+    // Not measurable: null *and* named in skipped_features. `has_people_on_screen` rides
+    // along on every row in this fixture (never tagged), appended after the structural skip.
     expect(row('skipped-density').features.text_density).toBeNull()
-    expect(row('skipped-density').skippedFeatures).toEqual(['text_density'])
+    expect(row('skipped-density').skippedFeatures).toEqual(['text_density', 'has_people_on_screen'])
 
     // Measured absent: null with nothing skipped. A single-shot video.
     expect(row('never-cut').features.first_cut_time_s).toBeNull()
-    expect(row('never-cut').skippedFeatures).toEqual([])
+    expect(row('never-cut').skippedFeatures).toEqual(['has_people_on_screen'])
 
     // Not attempted: no feature row at all, so there is no version and no measurements.
+    // has_people_on_screen still resolves — the tag join runs independently of the feature
+    // join — but the creative is excluded upstream by its null feature_schema_version either
+    // way, which is exactly the comment in panel.ts's SQL.
     expect(row('not-extracted').featureSchemaVersion).toBeNull()
-    expect(row('not-extracted').skippedFeatures).toEqual([])
+    expect(row('not-extracted').skippedFeatures).toEqual(['has_people_on_screen'])
     expect(row('not-extracted').features.duration_s).toBeNull()
   })
 

@@ -32,6 +32,8 @@ const creative = (over: Partial<PanelCreative>): PanelCreative => ({
     audio_energy_variance: 0.02,
   },
   skippedFeatures: [],
+  hookType: null,
+  tone: null,
   ...over,
 })
 

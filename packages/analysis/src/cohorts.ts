@@ -39,6 +39,13 @@ export const ANALYSIS_FEATURES = [
   'text_in_first_2s',
   'text_density',
   'audio_energy_variance',
+  // UC-8: not a `creative_features` column like its six neighbours — it is read from
+  // `creative_semantic_tags`, a second, independently-versioned table (see `panel.ts`'s
+  // `LATEST_SEMANTIC_TAGS` join) — but it is boolean, same as `text_in_first_2s`, so it runs
+  // through this exact pipeline unmodified: 0/1 in, z/p/q out. `hook_type` and `tone` are
+  // *not* here — small unordered categories with no ordering a rank test could use — and are
+  // surfaced descriptively instead (spec UC-8 §6).
+  'has_people_on_screen',
 ] as const
 
 export type AnalysisFeature = (typeof ANALYSIS_FEATURES)[number]
@@ -102,6 +109,16 @@ export interface PanelCreative {
   readonly extractorVersion: string | null
   readonly features: Readonly<Partial<Record<AnalysisFeature, number | null>>>
   readonly skippedFeatures: readonly string[]
+  /**
+   * UC-8's two descriptive tags. Not part of {@link features}: they are small unordered
+   * categories with no ordering a rank test could use ("testimonial" is not more or less
+   * than "demo"), so they never reach `stratify` or `vanElteren` — only
+   * `describeTagDistribution` (`tag-distribution.ts`) reads these fields. Null covers both
+   * "never tagged" and "the model declined this field" (spec §4); the distribution counts
+   * either as untagged, the same collapse `stratify` already applies to a skipped feature.
+   */
+  readonly hookType: string | null
+  readonly tone: string | null
 }
 
 export interface CohortMember {
@@ -111,6 +128,8 @@ export interface CohortMember {
   readonly isCensored: boolean
   readonly features: Readonly<Partial<Record<AnalysisFeature, number | null>>>
   readonly skippedFeatures: readonly string[]
+  readonly hookType: string | null
+  readonly tone: string | null
 }
 
 export interface CohortAssembly {
@@ -245,6 +264,8 @@ export function assembleCohorts(panel: readonly PanelCreative[]): CohortAssembly
       isCensored: creative.isCensored,
       features: creative.features,
       skippedFeatures: creative.skippedFeatures,
+      hookType: creative.hookType,
+      tone: creative.tone,
     })
   }
 
@@ -299,6 +320,11 @@ const MEASURED_ABSENT_ORDER: Readonly<Record<AnalysisFeature, 'above-all' | null
   text_in_first_2s: null,
   text_density: null,
   audio_energy_variance: null,
+  // Same as `text_in_first_2s`: no measured-absent state exists for a boolean. The panel
+  // query puts `has_people_on_screen` into `skipped_features` whenever the value is null —
+  // whether the creative was never tagged or the model declined the field — so a null that
+  // arrives here with no matching skip entry is an upstream bug, same as every other feature.
+  has_people_on_screen: null,
 }
 
 export interface FeatureStrata {

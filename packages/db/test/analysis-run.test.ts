@@ -1,9 +1,12 @@
 import {
   ANALYSIS_VERSION,
   assembleCohorts,
+  describeTagDistribution,
+  HOOK_TYPES,
   MIN_PANEL_AGE_DAYS,
   MixedFeatureVersionsError,
   runContrasts,
+  TONES,
 } from '@mini-crux/analysis'
 import { newTraceId, type Actor, type TraceId } from '@mini-crux/core'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -63,9 +66,9 @@ interface Features {
 }
 
 /**
- * Long-lived and short-lived measurements that never overlap, so all six features have
+ * Long-lived and short-lived measurements that never overlap, so all seven features have
  * variance and none of them comes back untestable. A fixture where one feature is constant
- * would make `featureCount` 5 and quietly weaken every count below.
+ * would make `featureCount` 6 and quietly weaken every count below.
  */
 const longFeatures = (i: number): Features => ({
   durationS: 20 + i,
@@ -84,6 +87,24 @@ const shortFeatures = (i: number): Features => ({
   textDensity: 0.1 + i * 0.01,
   audioEnergyVariance: 0.01 + i * 0.001,
 })
+
+// UC-8: leans toward the long-lived cohort (5 of 7 vs. 2 of 7 per advertiser) but overlaps,
+// so it needs the rank test rather than a perfect split — same discipline as the six
+// structural features above, and named separately from `textInFirst2s` so this feature is
+// not silently riding on that one's partition.
+const longHasPeopleOnScreen = (i: number): boolean => i % 3 !== 0
+const shortHasPeopleOnScreen = (i: number): boolean => i % 3 === 0
+
+// UC-8's other half: hook_type/tone, descriptive rather than tested. `i === 6` (one per
+// advertiser, three of twenty-one) is left untagged on purpose, so the breakdown's
+// `untaggedLong`/`untaggedShort` has something to count — a fixture where every member is
+// tagged would leave that branch of `describeTagDistribution` unexercised end to end. Long
+// and short cycle through the taxonomy on different offsets so the two sides' counts differ,
+// which is what proves the stored rows are per-cohort rather than one shared total.
+const longHookType = (i: number): string | null => (i < 6 ? HOOK_TYPES[i]! : null)
+const longTone = (i: number): string | null => (i < 6 ? TONES[i]! : null)
+const shortHookType = (i: number): string => HOOK_TYPES[(i + 2) % HOOK_TYPES.length]!
+const shortTone = (i: number): string => TONES[(i + 3) % TONES.length]!
 
 interface RunRow {
   id: string
@@ -120,6 +141,13 @@ interface ResultRow {
   rank_biserial: number
   strata_used: number
   strata_dropped: number
+}
+
+interface TagResultRow {
+  tag: string
+  value: string
+  n_long: number
+  n_short: number
 }
 
 describe('the analysis job', () => {
@@ -248,6 +276,22 @@ describe('the analysis job', () => {
     )
   }
 
+  async function addSemanticTag(
+    workspace: string,
+    creativeId: string,
+    hasPeopleOnScreen: boolean,
+    hookType: string | null = null,
+    tone: string | null = null,
+    version = 1,
+  ): Promise<void> {
+    await db.query(
+      `insert into public.creative_semantic_tags
+         (workspace_id, creative_id, schema_version, has_people_on_screen, hook_type, tone)
+       values ($1, $2, $3, $4, $5, $6)`,
+      [workspace, creativeId, version, hasPeopleOnScreen, hookType, tone],
+    )
+  }
+
   // ────────────────────────────── the panels ──────────────────────────────
 
   /**
@@ -280,6 +324,7 @@ describe('the analysis job', () => {
         await observe(workspace, id, runs[2]!, day(2), true)
         if (!censored) await observe(workspace, id, runs[3]!, day(3), false)
         await addFeatures(workspace, id, longFeatures(i), MEMBER_BUILDS[i === 0 ? 1 : 0]!)
+        await addSemanticTag(workspace, id, longHasPeopleOnScreen(i), longHookType(i), longTone(i))
       }
 
       for (let i = 0; i < 7; i += 1) {
@@ -294,6 +339,13 @@ describe('the analysis job', () => {
         await observe(workspace, id, runs[21]!, day(21), true)
         await observe(workspace, id, runs[22]!, day(22), false)
         await addFeatures(workspace, id, shortFeatures(i), MEMBER_BUILDS[i === 0 ? 1 : 0]!)
+        await addSemanticTag(
+          workspace,
+          id,
+          shortHasPeopleOnScreen(i),
+          shortHookType(i),
+          shortTone(i),
+        )
       }
     }
 
@@ -347,12 +399,23 @@ describe('the analysis job', () => {
     const long = await newCreative(workspace, advertiserId, 'b-long', LONG_START)
     await observe(workspace, long, runs[1]!, day(1), true)
     await addFeatures(workspace, long, longFeatures(0), MEMBER_BUILDS[0]!)
+    // Tagged, on purpose: this run refuses on panel age with cohorts already assembled, so a
+    // tag row here would prove the trigger caught a real would-be write rather than an empty
+    // no-op that happened to be vacuously correct.
+    await addSemanticTag(workspace, long, longHasPeopleOnScreen(0), longHookType(0), longTone(0))
 
     const short = await newCreative(workspace, advertiserId, 'b-short', `${day(1)}T12:00:00Z`)
     await observe(workspace, short, runs[1]!, day(1), true)
     await observe(workspace, short, runs[2]!, day(2), true)
     await observe(workspace, short, runs[3]!, day(3), false)
     await addFeatures(workspace, short, shortFeatures(0), MEMBER_BUILDS[0]!)
+    await addSemanticTag(
+      workspace,
+      short,
+      shortHasPeopleOnScreen(0),
+      shortHookType(0),
+      shortTone(0),
+    )
   }
 
   beforeAll(async () => {
@@ -430,6 +493,15 @@ describe('the analysis job', () => {
       [analysisRunId],
     )
 
+  const tagResultsFor = async (analysisRunId: string): Promise<TagResultRow[]> =>
+    db.query<TagResultRow>(
+      `select tag, value, n_long, n_short
+       from public.analysis_tag_results
+       where analysis_run_id = $1
+       order by tag, value`,
+      [analysisRunId],
+    )
+
   // ────────────────────────────── the two endings that write nothing ──────────────────────
 
   it('writes nothing when the only crawl this workspace ever had failed', async () => {
@@ -495,6 +567,14 @@ describe('the analysis job', () => {
     // A refused run still pins the version it read. The column is nullable only for a run
     // whose panel produced no members at all, which is not this one.
     expect(run!.feature_schema_version).toBe(FEATURE_VERSION)
+  })
+
+  it('publishes no tag breakdown from a run that refused', async () => {
+    // The same rule as the feature results, one table over: migration 0014 attaches the
+    // identical `assert_run_published` trigger, and this proves it does something rather
+    // than merely existing — there is a hook_type/tone on both fixture creatives here.
+    const [run] = await runsFor(ws.B)
+    expect(await tagResultsFor(run!.id)).toEqual([])
   })
 
   // ────────────────────────────── publication ──────────────────────────────
@@ -603,6 +683,48 @@ describe('the analysis job', () => {
     }
   })
 
+  it('writes the hook_type/tone breakdown alongside the feature results', async () => {
+    // Recomputed from the same panel, same discipline as the feature-results test above: the
+    // point is that the job stored what `describeTagDistribution` said, not that this test's
+    // own arithmetic matches the fixture.
+    const [run] = await runsFor(ws.A)
+    const members = assembleCohorts(await getAnalysisPanel(db, ws.A)).members
+
+    for (const tag of ['hook_type', 'tone'] as const) {
+      const expected = describeTagDistribution(members, tag)
+      const stored = (await tagResultsFor(run!.id)).filter((r) => r.tag === tag)
+
+      // Every taxonomy value plus 'untagged', never fewer — a value nobody used still writes
+      // as an explicit zero (spec §6), so a job that skipped empty buckets would undercount
+      // this list rather than merely zero a row.
+      expect(stored.map((r) => r.value).sort()).toEqual(
+        [...expected.counts.map((c) => c.value), 'untagged'].sort(),
+      )
+
+      for (const count of expected.counts) {
+        const row = stored.find((r) => r.value === count.value)!
+        expect(row.n_long).toBe(count.nLong)
+        expect(row.n_short).toBe(count.nShort)
+      }
+
+      const untagged = stored.find((r) => r.value === 'untagged')!
+      expect(untagged.n_long).toBe(expected.untaggedLong)
+      expect(untagged.n_short).toBe(expected.untaggedShort)
+
+      // Three of twenty-one long-lived creatives (one per advertiser) were left untagged by
+      // the fixture on purpose — proving this is a nonzero count, not an unreachable branch.
+      expect(expected.untaggedLong).toBe(3)
+      expect(expected.untaggedShort).toBe(0)
+
+      // Counts sum to n on the stored rows themselves, not just on the module's own output —
+      // the acceptance criterion checked against what actually reached the table.
+      const sumLong = stored.reduce((s, r) => s + r.n_long, 0)
+      const sumShort = stored.reduce((s, r) => s + r.n_short, 0)
+      expect(sumLong).toBe(21)
+      expect(sumShort).toBe(21)
+    }
+  })
+
   // ────────────────────────────── the audit trail ──────────────────────────────
 
   it('leaves one audit event per run, on the trace id it was handed', async () => {
@@ -614,7 +736,7 @@ describe('the analysis job', () => {
     expect(published[0]!.actor).toEqual(actor)
     expect(published[0]!.payload).toEqual({
       panel_date: day(PANEL_DAYS),
-      feature_count: 6,
+      feature_count: 7,
       untestable: [],
       n_long: 21,
       n_short: 21,
@@ -654,5 +776,14 @@ describe('the analysis job', () => {
        where r.workspace_id <> a.workspace_id`,
     )
     expect(stray).toEqual([])
+
+    // Same check, one table over.
+    const strayTags = await db.query(
+      `select r.id
+       from public.analysis_tag_results r
+       join public.analysis_runs a on a.id = r.analysis_run_id
+       where r.workspace_id <> a.workspace_id`,
+    )
+    expect(strayTags).toEqual([])
   })
 })

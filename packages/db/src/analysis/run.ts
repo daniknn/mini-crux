@@ -1,8 +1,15 @@
 import type { Actor, TraceId } from '@mini-crux/core'
-import type { AnalysisFeature, CohortAssembly, GateDetail, GateId } from '@mini-crux/analysis'
+import type {
+  AnalysisFeature,
+  CohortAssembly,
+  DescriptiveTag,
+  GateDetail,
+  GateId,
+} from '@mini-crux/analysis'
 import {
   ANALYSIS_VERSION,
   assembleCohorts,
+  describeTagDistribution,
   evaluateGates,
   runContrasts,
 } from '@mini-crux/analysis'
@@ -51,6 +58,9 @@ import { getAnalysisPanel, getPanelWindow } from './panel.ts'
 
 /** The `jobs.type` this handler answers to. */
 export const ANALYSIS_JOB_TYPE = 'analysis'
+
+/** UC-8's two descriptive tags, in the order the breakdown is written and read back. */
+const DESCRIPTIVE_TAGS = ['hook_type', 'tone'] as const satisfies readonly DescriptiveTag[]
 
 export interface AnalysisDeps {
   /**
@@ -165,6 +175,24 @@ export async function runAnalysis(
     )
   }
 
+  // The other half of UC-8: `hook_type`/`tone`, counted rather than tested (spec §6). Written
+  // in the same run as the contrasts above, under the same `assert_run_published` guard, so
+  // "a run either publishes everything it computed or nothing" holds for the descriptive
+  // breakdown exactly as it holds for the statistical one.
+  for (const tag of DESCRIPTIVE_TAGS) {
+    const breakdown = describeTagDistribution(assembly.members, tag)
+    for (const count of breakdown.counts) {
+      await insertTagResult(deps.db, input.workspaceId, analysisRunId, tag, count.value, {
+        nLong: count.nLong,
+        nShort: count.nShort,
+      })
+    }
+    await insertTagResult(deps.db, input.workspaceId, analysisRunId, tag, 'untagged', {
+      nLong: breakdown.untaggedLong,
+      nShort: breakdown.untaggedShort,
+    })
+  }
+
   await appendAuditEvent(deps.db, {
     workspaceId: input.workspaceId,
     traceId: input.traceId,
@@ -187,6 +215,27 @@ export async function runAnalysis(
     featureCount: contrasts.features.length,
     untestable: contrasts.untestable,
   }
+}
+
+/**
+ * One row of the descriptive breakdown: how many cohort members carried this `value` for this
+ * `tag` — or, when `value` is `'untagged'`, how many carried none. See migration 0014 for why
+ * `'untagged'` is a literal taxonomy member rather than a null value in this table.
+ */
+async function insertTagResult(
+  db: SqlExecutor,
+  workspaceId: string,
+  analysisRunId: string,
+  tag: DescriptiveTag,
+  value: string,
+  counts: { nLong: number; nShort: number },
+): Promise<void> {
+  await db.query(
+    `insert into public.analysis_tag_results
+       (workspace_id, analysis_run_id, tag, value, n_long, n_short)
+     values ($1, $2, $3, $4, $5, $6)`,
+    [workspaceId, analysisRunId, tag, value, counts.nLong, counts.nShort],
+  )
 }
 
 interface InsertRunArgs {

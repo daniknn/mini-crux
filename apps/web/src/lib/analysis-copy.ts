@@ -1,4 +1,4 @@
-import type { AnalysisFeature, GateId } from '@mini-crux/analysis'
+import { HOOK_TYPES, TONES, type AnalysisFeature, type DescriptiveTag, type GateId } from '@mini-crux/analysis'
 
 /**
  * The words UC-5 puts around its numbers.
@@ -38,11 +38,65 @@ const FEATURE_COPY: Readonly<Record<AnalysisFeature, FeatureCopy>> = {
   text_in_first_2s: { label: 'Texto en los primeros 2 s', more: 'abre con texto en pantalla' },
   text_density: { label: 'Densidad de texto', more: 'tiene más texto en pantalla' },
   audio_energy_variance: { label: 'Variación de audio', more: 'varía más su audio' },
+  has_people_on_screen: { label: 'Personas en pantalla', more: 'muestra personas en pantalla' },
 }
 
 export function featureLabel(feature: AnalysisFeature): string {
   return FEATURE_COPY[feature].label
 }
+
+/**
+ * UC-8's other two tags. Deliberately a different shape from {@link FEATURE_COPY}: `hook_type`
+ * and `tone` have no `more` clause, because there is no comparative sentence to complete — the
+ * whole point of a descriptive breakdown is that "5 of 8 opened with a testimonial" needs no
+ * "el creativo longevo ___" wrapped around it (spec §6). The banned-vocabulary sweep in
+ * `analysis-copy.test.ts` folds every string these two taxonomies can render into the same
+ * `everyString()` the tested features go through — one check across the whole surface.
+ */
+const TAG_COPY: Readonly<Record<DescriptiveTag, string>> = {
+  hook_type: 'Tipo de gancho',
+  tone: 'Tono',
+}
+
+const HOOK_TYPE_VALUE_COPY: Readonly<Record<(typeof HOOK_TYPES)[number], string>> = {
+  testimonial: 'Testimonio',
+  demo: 'Demostración',
+  problem_solution: 'Problema y solución',
+  ugc: 'Contenido de usuario',
+  offer: 'Oferta',
+  other: 'Otro',
+}
+
+const TONE_VALUE_COPY: Readonly<Record<(typeof TONES)[number], string>> = {
+  humoristico: 'Humorístico',
+  emocional: 'Emocional',
+  informativo: 'Informativo',
+  urgente: 'Urgente',
+  aspiracional: 'Aspiracional',
+  other: 'Otro',
+}
+
+export function tagLabel(tag: DescriptiveTag): string {
+  return TAG_COPY[tag]
+}
+
+/** A taxonomy value in Spanish, or the untagged caption — never the raw column value. */
+export function tagValueLabel(tag: DescriptiveTag, value: string): string {
+  if (value === 'untagged') return 'Sin etiquetar'
+  const copy: Readonly<Record<string, string>> =
+    tag === 'hook_type' ? HOOK_TYPE_VALUE_COPY : TONE_VALUE_COPY
+  return copy[value] ?? value
+}
+
+/**
+ * Sits under every tag breakdown, at the same weight as the caveats on a tested feature (spec
+ * acceptance criterion "no p-value and no q-value attached", made visible rather than merely
+ * true by omission — a reader who has just read six cards with a q on every one should not
+ * have to notice its absence here to know none was computed).
+ */
+export const DESCRIPTIVE_TAG_NOTE =
+  'Conteo descriptivo. A diferencia de las medidas de arriba, esto no pasa por una prueba ' +
+  'estadística: no lleva p ni q, solo cuántos creativos de cada cohorte llevan cada etiqueta.'
 
 /**
  * The effect size in plain language, with the qualifier that makes it true.

@@ -1,4 +1,4 @@
-import { ANALYSIS_FEATURES } from '@mini-crux/analysis'
+import { ANALYSIS_FEATURES, HOOK_TYPES, TONES } from '@mini-crux/analysis'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { asAuthenticated, createTestDb, seedWorkspace, type TestDb } from '../src/testing.ts'
@@ -327,6 +327,180 @@ describe('analysis schema', () => {
         [workspaceA],
       )
       expect(row?.censoring_rate_long).toBeNull()
+    })
+  })
+
+  describe('analysis_tag_results', () => {
+    /**
+     * UC-8's descriptive half, at the schema level. `analysis-run.test.ts` and
+     * `dashboard-analysis.test.ts` already prove the job writes these rows and the surface
+     * reads them back; what belongs here is what migration 0014 promises the table itself
+     * refuses — the same posture as the `analysis_feature_results` block above, plus the
+     * two guarantees specific to this table: a per-tag taxonomy check, and `'untagged'` as a
+     * literal value rather than a null the unique constraint would let through twice.
+     */
+    async function insertTagResult(
+      runId: string,
+      workspaceId: string,
+      overrides: Record<string, unknown> = {},
+    ): Promise<void> {
+      await db.exec('reset role')
+      const values = {
+        tag: 'hook_type',
+        value: 'testimonial',
+        n_long: 5,
+        n_short: 3,
+        ...overrides,
+      }
+      await db.query(
+        `insert into public.analysis_tag_results (
+           workspace_id, analysis_run_id, tag, value, n_long, n_short
+         ) values ($1, $2, $3, $4, $5, $6)`,
+        [workspaceId, runId, values.tag, values.value, values.n_long, values.n_short],
+      )
+    }
+
+    it('accepts a breakdown row for a published run', async () => {
+      const runId = await insertRun({ workspaceId: workspaceA, traceId: 'trc_tag_ok' })
+      await insertTagResult(runId, workspaceA)
+      const rows = await db.query(
+        `select id from public.analysis_tag_results where analysis_run_id = $1`,
+        [runId],
+      )
+      expect(rows).toHaveLength(1)
+    })
+
+    it('rejects a breakdown row for a refused run', async () => {
+      // Same guard as the statistical results, reused rather than redefined — migration 0014
+      // attaches `app.assert_run_published` a second time instead of copying it.
+      const runId = await insertRun({
+        workspaceId: workspaceA,
+        outcome: 'refused',
+        failedGate: 'MIN_STRATA',
+        traceId: 'trc_tag_refused',
+      })
+      await expect(insertTagResult(runId, workspaceA)).rejects.toThrow(
+        /run that refused publishes no feature results/,
+      )
+    })
+
+    it('rejects a row filed against a run in another workspace', async () => {
+      const runId = await insertRun({ workspaceId: workspaceB, traceId: 'trc_tag_tenant' })
+      await expect(insertTagResult(runId, workspaceA)).rejects.toThrow(
+        /does not match analysis run workspace/,
+      )
+    })
+
+    it('rejects a hook_type-only value on a tone row, and a tone-only value on a hook_type row', async () => {
+      // The compound check is per-tag on purpose (migration 0014's header): a flat
+      // `value in (...)` across both lists would let a `tone` row carry a `hook_type`-only
+      // value like `'ugc'` and nothing would catch it.
+      const runId = await insertRun({ workspaceId: workspaceA, traceId: 'trc_tag_cross' })
+      await expect(
+        insertTagResult(runId, workspaceA, { tag: 'tone', value: 'ugc' }),
+      ).rejects.toThrow()
+      await expect(
+        insertTagResult(runId, workspaceA, { tag: 'hook_type', value: 'urgente' }),
+      ).rejects.toThrow()
+    })
+
+    it('constrains exactly the taxonomies the analysis knows how to count, plus untagged', async () => {
+      // Same discipline as `constrains exactly the features...` above: read the constraint
+      // Postgres actually installed, not the migration text, and compare it against the
+      // module's own lists rather than a copy pasted into this file.
+      await db.exec('reset role')
+      const [row] = await db.query<{ definition: string }>(
+        `select pg_get_constraintdef(c.oid) as definition
+         from pg_constraint c
+         join pg_class t on t.oid = c.conrelid
+         where t.relname = 'analysis_tag_results' and c.contype = 'c'
+           and c.conname = 'analysis_tag_results_check'`,
+      )
+
+      // Both taxonomies, 'untagged', and the two tag names themselves all appear in this one
+      // compound check — so assert containment of each list rather than equality against
+      // either alone.
+      const values = [...(row!.definition.matchAll(/'([a-z0-9_]+)'/g))].map((m) => m[1]!)
+      for (const value of HOOK_TYPES) expect(values).toContain(value)
+      for (const value of TONES) expect(values).toContain(value)
+      expect(values).toContain('untagged')
+    })
+
+    it('treats untagged as one taxonomy row, not a null the unique constraint would miss twice', async () => {
+      // The trap migration 0014's header calls out: a nullable `value` would let two
+      // 'untagged' rows for the same (run, tag) both pass `unique (run, tag, value)`, since
+      // Postgres treats every null as distinct from every other null. A literal string closes
+      // it, and this proves the unique constraint actually fires on it.
+      const runId = await insertRun({ workspaceId: workspaceA, traceId: 'trc_tag_untagged' })
+      await insertTagResult(runId, workspaceA, { tag: 'hook_type', value: 'untagged' })
+      await expect(
+        insertTagResult(runId, workspaceA, { tag: 'hook_type', value: 'untagged' }),
+      ).rejects.toThrow()
+    })
+
+    it('allows one row per (run, tag, value) and no more', async () => {
+      const runId = await insertRun({ workspaceId: workspaceA, traceId: 'trc_tag_dupe' })
+      await insertTagResult(runId, workspaceA, { tag: 'tone', value: 'urgente' })
+      await expect(
+        insertTagResult(runId, workspaceA, { tag: 'tone', value: 'urgente' }),
+      ).rejects.toThrow()
+    })
+
+    it('rejects a negative count on either side', async () => {
+      const runId = await insertRun({ workspaceId: workspaceA, traceId: 'trc_tag_neg' })
+      await expect(insertTagResult(runId, workspaceA, { n_long: -1 })).rejects.toThrow(/n_long/)
+      await expect(insertTagResult(runId, workspaceA, { n_short: -1 })).rejects.toThrow(
+        /n_short/,
+      )
+    })
+
+    it('refuses to rewrite a published breakdown row, even with the privilege granted back', async () => {
+      const runId = await insertRun({ workspaceId: workspaceA, traceId: 'trc_tag_append' })
+      await insertTagResult(runId, workspaceA, { tag: 'tone', value: 'emocional' })
+      await db.exec('reset role')
+      await db.exec('grant update, delete on public.analysis_tag_results to service_role')
+
+      await expect(
+        db.query(`update public.analysis_tag_results set n_long = 99 where analysis_run_id = $1`, [
+          runId,
+        ]),
+      ).rejects.toThrow(/append-only/)
+
+      await db.exec('revoke update, delete on public.analysis_tag_results from service_role')
+    })
+
+    it('grants no update or delete to any client role', async () => {
+      const rows = await db.query<{
+        table_name: string
+        grantee: string
+        privilege_type: string
+      }>(
+        `select table_name, grantee, privilege_type
+         from information_schema.role_table_grants
+         where table_schema = 'public'
+           and table_name = 'analysis_tag_results'
+           and grantee in ('anon', 'authenticated', 'service_role')
+           and privilege_type in ('UPDATE', 'DELETE')`,
+      )
+      expect(rows).toEqual([])
+    })
+
+    it('shows a workspace only its own breakdown rows', async () => {
+      const runA = await insertRun({ workspaceId: workspaceA, traceId: 'trc_tag_iso_a' })
+      const runB = await insertRun({ workspaceId: workspaceB, traceId: 'trc_tag_iso_b' })
+      await insertTagResult(runA, workspaceA, { tag: 'hook_type', value: 'demo' })
+      await insertTagResult(runB, workspaceB, { tag: 'hook_type', value: 'demo' })
+
+      const visibleToA = await asAuthenticated(db, { sub: USER_A, org_id: ORG_A }, (d) =>
+        d.query<{ id: string }>(`select id from public.analysis_tag_results`),
+      )
+      const rowIdsB = await db.query<{ id: string }>(
+        `select id from public.analysis_tag_results where analysis_run_id = $1`,
+        [runB],
+      )
+      const visibleIds = visibleToA.map((r) => r.id)
+      expect(visibleIds).not.toContain(rowIdsB[0]!.id)
+      expect(visibleIds.length).toBeGreaterThan(0)
     })
   })
 

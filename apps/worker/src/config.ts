@@ -17,8 +17,12 @@ export interface WorkerSettings {
   supabaseUrl: string
   serviceRoleKey: string
   rawBucket: string
+  mediaBucket: string
   apifyToken: string
   apifyActorId: string
+  /** UC-8 semantic tagging. */
+  openaiApiKey: string
+  vlmModel: string
   pollIntervalMs: number
 }
 
@@ -59,8 +63,11 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): WorkerSettin
     supabaseUrl: required(env, 'SUPABASE_URL'),
     serviceRoleKey: required(env, 'SUPABASE_SERVICE_ROLE_KEY'),
     rawBucket: env['SUPABASE_RAW_BUCKET'] ?? 'raw',
+    mediaBucket: env['SUPABASE_MEDIA_BUCKET'] ?? 'media',
     apifyToken: required(env, 'APIFY_TOKEN'),
     apifyActorId: required(env, 'APIFY_AD_LIBRARY_ACTOR_ID'),
+    openaiApiKey: required(env, 'OPENAI_API_KEY'),
+    vlmModel: env['VLM_MODEL'] ?? 'gpt-4o-mini',
     pollIntervalMs,
   }
 }

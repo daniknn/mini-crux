@@ -13,7 +13,7 @@ let seq = 0
 
 /**
  * Three advertisers, eight long-lived and eight short-lived creatives each, with the feature
- * values chosen so the six contrasts come back materially different from one another:
+ * values chosen so the seven contrasts come back materially different from one another:
  *
  * - `cuts_per_second` separates the cohorts perfectly, so its p is the smallest in the run.
  * - `duration_s` is the same number on every creative, so its variance is exactly zero and
@@ -48,8 +48,14 @@ const panel = (): PanelCreative[] => {
             text_density: i % 2 === 0 ? 0.2 : 0.6,
             text_in_first_2s: i % 2,
             audio_energy_variance: (i * 7) % 5,
+            // UC-8: leans toward the long-lived cohort (6 of 8 vs. 3 of 8) but overlaps —
+            // some short-lived creatives show people too — so it needs the same rank test as
+            // every continuous feature above, not a perfect split like cuts_per_second.
+            has_people_on_screen: (long ? i % 3 !== 0 : i % 3 === 0) ? 1 : 0,
           },
           skippedFeatures: [],
+          hookType: null,
+          tone: null,
         })
       }
     }
@@ -99,8 +105,8 @@ describe('running every feature', () => {
     expect(features.map((f) => f.qValue)).toEqual(benjaminiHochberg(ps))
 
     // And the size of that set is load-bearing on this fixture: standing the untestable
-    // feature back up with a placeholder p — the obvious "keep all six" fix — changes the
-    // published q-values. Without this the assertion above would hold for m = 5 and m = 6
+    // feature back up with a placeholder p — the obvious "keep all seven" fix — changes the
+    // published q-values. Without this the assertion above would hold for m = 6 and m = 7
     // alike and the whole argument in the module header would be untested.
     const withPlaceholder = benjaminiHochberg([...ps, 1]).slice(0, ps.length)
     expect(withPlaceholder).not.toEqual(features.map((f) => f.qValue))

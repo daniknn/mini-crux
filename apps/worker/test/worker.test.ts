@@ -102,6 +102,7 @@ function stubHandlers(overrides: Partial<Handlers> = {}): {
       parse: record(),
       analysis: record(),
       proxy_validation: record(),
+      semantic_tag: record(),
       ...overrides,
     },
     seen,
@@ -141,6 +142,7 @@ describe('claiming and dispatch', () => {
     await enqueue('parse')
     await enqueue('analysis')
     await enqueue('proxy_validation')
+    await enqueue('semantic_tag')
 
     const dispatched: string[] = []
     const tag =
@@ -153,11 +155,12 @@ describe('claiming and dispatch', () => {
       parse: tag('parse'),
       analysis: tag('analysis'),
       proxy_validation: tag('proxy_validation'),
+      semantic_tag: tag('semantic_tag'),
     })
 
     while (await worker.runOnce());
 
-    expect(dispatched.sort()).toEqual(['analysis', 'crawl', 'parse', 'proxy_validation'])
+    expect(dispatched.sort()).toEqual(['analysis', 'crawl', 'parse', 'proxy_validation', 'semantic_tag'])
   })
 
   it('returns false and touches nothing when the queue is empty', async () => {

@@ -389,6 +389,7 @@ describe('scheduled ticks', () => {
       'enqueue_daily_analysis',
       'enqueue_daily_crawls',
       'enqueue_pending_extractions',
+      'enqueue_pending_semantic_tags',
     ])
   })
 
@@ -420,24 +421,36 @@ describe('scheduled ticks', () => {
        values ($1, 'page_1', 'Stori') returning id`,
       [workspaceId],
     )
-    await db.query(
+    const creative = await db.query<{ id: string }>(
       `insert into public.creatives (workspace_id, advertiser_id, creative_hash, media_type, media_url)
-       values ($1, $2, 'hash_1', 'video', 'https://cdn.example.test/a.mp4')`,
+       values ($1, $2, 'hash_1', 'video', 'https://cdn.example.test/a.mp4') returning id`,
       [workspaceId, advertiser[0]!.id],
     )
-
     await db.query('select app.enqueue_daily_crawls($1::date)', [PANEL_DATE])
     await db.query('select app.enqueue_daily_analysis($1::date)', [PANEL_DATE])
     // Takes an explicit feature schema version — it is the extractor's backlog reconciler,
-    // not a cron tick, which is why it is absent from the schedule assertions above.
+    // not a cron tick, which is why it is absent from the schedule assertions above. Must run
+    // before the features row below exists, or its own "no current row" gate finds nothing.
     await db.query('select app.enqueue_pending_extractions(1)')
+    // Tagging is gated on a current features row with frames already sampled (spec §5) —
+    // inserted only now, after the extraction reconciler above has already seen the gap it
+    // needs to see. Without this row, enqueue_pending_semantic_tags below would correctly
+    // find nothing and the fourth actor would go unexercised.
+    await db.query(
+      `insert into public.creative_features
+         (workspace_id, creative_id, schema_version, semantic_frame_paths)
+       values ($1, $2, 1, array['frame_a.jpg', 'frame_b.jpg', 'frame_c.jpg'])`,
+      [workspaceId, creative[0]!.id],
+    )
+    // Same posture: the tagging backlog reconciler, also not cron-scheduled (RUNBOOK-invoked).
+    await db.query('select app.enqueue_pending_semantic_tags(1)')
 
     const jobs = await db.query<{ type: string; actor: unknown }>(
       'select type, actor from public.jobs order by type',
     )
-    // All three fired, so the loop below is over three actors and not vacuous over an empty
+    // All four fired, so the loop below is over four actors and not vacuous over an empty
     // table — which is how this class of test usually passes while proving nothing.
-    expect(jobs.map((j) => j.type)).toEqual(['analysis', 'crawl', 'extract'])
+    expect(jobs.map((j) => j.type)).toEqual(['analysis', 'crawl', 'extract', 'semantic_tag'])
     for (const job of jobs) {
       expect(isActor(job.actor), `${job.type} actor: ${JSON.stringify(job.actor)}`).toBe(true)
     }

@@ -2,7 +2,13 @@ import { newTraceId, operatorActor } from '@mini-crux/core'
 import { enqueueJob } from '@mini-crux/db'
 import { createTestDb, seedWorkspace } from '@mini-crux/db/testing'
 import type { TestDb } from '@mini-crux/db/testing'
-import { createFixtureProvider, createMemoryStore, fixtureAd } from '@mini-crux/ingestion'
+import {
+  createFixtureMediaUrlSigner,
+  createFixtureProvider,
+  createMemoryStore,
+  createVlmFixtureProvider,
+  fixtureAd,
+} from '@mini-crux/ingestion'
 import type { AdLibraryAd, FixtureDay, ObjectStore } from '@mini-crux/ingestion'
 import { seedWatchlist, tick } from '@mini-crux/ingestion/testing'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -48,6 +54,8 @@ function workerWith(days: FixtureDay[]): Worker {
       db,
       store,
       provider: createFixtureProvider(days),
+      vlmProvider: createVlmFixtureProvider([]),
+      mediaUrlSigner: createFixtureMediaUrlSigner(),
     }),
     onError: (): void => {},
   })

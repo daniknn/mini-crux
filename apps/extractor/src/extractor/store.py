@@ -177,6 +177,7 @@ class PostgresJobStore:
                     features.truncated,
                     features.skipped_features,
                     features.poster_storage_path,
+                    features.semantic_frame_paths,
                     extractor_version,
                     job.trace_id,
                 )

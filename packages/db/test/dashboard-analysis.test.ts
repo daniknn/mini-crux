@@ -1,4 +1,4 @@
-import { ANALYSIS_FEATURES } from '@mini-crux/analysis'
+import { ANALYSIS_FEATURES, HOOK_TYPES, TONES } from '@mini-crux/analysis'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { getLatestAnalysis, type LatestAnalysis } from '../src/dashboard/index.ts'
@@ -133,6 +133,25 @@ const FEATURE_ROWS = [
   },
 ] as const
 
+/**
+ * Workspace A's tag breakdown. Deliberately sparse per tag — three of the six taxonomy
+ * values used, three left for the read side to fill in as zeros — so the test cannot pass by
+ * accident from a query that only echoed back the rows it found. `hook_type` and `tone` use
+ * different values and different counts so the two tags cannot be read from each other's
+ * rows. Every column sums to the run's `n_long`/`n_short` (23/31), the same "counts sum to n"
+ * discipline as `analysis-run.test.ts`.
+ */
+const TAG_ROWS: { tag: 'hook_type' | 'tone'; value: string; nLong: number; nShort: number }[] = [
+  { tag: 'hook_type', value: 'testimonial', nLong: 10, nShort: 5 },
+  { tag: 'hook_type', value: 'demo', nLong: 8, nShort: 12 },
+  { tag: 'hook_type', value: 'other', nLong: 2, nShort: 6 },
+  { tag: 'hook_type', value: 'untagged', nLong: 3, nShort: 8 },
+  { tag: 'tone', value: 'humoristico', nLong: 6, nShort: 10 },
+  { tag: 'tone', value: 'urgente', nLong: 9, nShort: 4 },
+  { tag: 'tone', value: 'aspiracional', nLong: 4, nShort: 9 },
+  { tag: 'tone', value: 'untagged', nLong: 4, nShort: 8 },
+]
+
 describe('getLatestAnalysis', () => {
   let db: TestDb
   let latest: Record<Key, LatestAnalysis | null>
@@ -192,6 +211,19 @@ describe('getLatestAnalysis', () => {
           9,
           2,
         ],
+      )
+    }
+
+    // Inserted in reverse declared order too, for the same reason: a query relying on
+    // insertion order rather than the fixed taxonomy would put the rows back in whatever
+    // order they landed, and `hook_type` before `tone` specifically would hide a query that
+    // read the two tags from a shared, untagged cursor.
+    for (const row of [...TAG_ROWS].reverse()) {
+      await db.query(
+        `insert into public.analysis_tag_results
+           (workspace_id, analysis_run_id, tag, value, n_long, n_short)
+         values ($1, $2, $3, $4, $5, $6)`,
+        [ws.a, '11111111-0000-4000-8000-000000000002', row.tag, row.value, row.nLong, row.nShort],
       )
     }
 
@@ -366,6 +398,45 @@ describe('getLatestAnalysis', () => {
     expect(latest.a?.nLong).toBe(23)
   })
 
+  it('reconstructs the tag breakdown from the stored rows, unused values filled in as zeros', () => {
+    // hook_type then tone, always both — the job writes every taxonomy value for both, and
+    // the read side mirrors that shape back rather than only returning what it found.
+    expect(latest.a?.tagBreakdowns.map((b) => b.tag)).toEqual(['hook_type', 'tone'])
+
+    const hookType = latest.a?.tagBreakdowns[0]
+    expect(hookType?.counts).toEqual(
+      HOOK_TYPES.map((value) => {
+        const row = TAG_ROWS.find((r) => r.tag === 'hook_type' && r.value === value)
+        return { value, nLong: row?.nLong ?? 0, nShort: row?.nShort ?? 0 }
+      }),
+    )
+    expect(hookType?.untaggedLong).toBe(3)
+    expect(hookType?.untaggedShort).toBe(8)
+    // Sums to the run's n, not to some other total — the same acceptance criterion as the
+    // module that computed these rows in the first place, checked again on the read side.
+    expect(hookType?.nLong).toBe(23)
+    expect(hookType?.nShort).toBe(31)
+
+    const tone = latest.a?.tagBreakdowns[1]
+    expect(tone?.counts).toEqual(
+      TONES.map((value) => {
+        const row = TAG_ROWS.find((r) => r.tag === 'tone' && r.value === value)
+        return { value, nLong: row?.nLong ?? 0, nShort: row?.nShort ?? 0 }
+      }),
+    )
+    expect(tone?.untaggedLong).toBe(4)
+    expect(tone?.untaggedShort).toBe(8)
+    expect(tone?.nLong).toBe(23)
+    expect(tone?.nShort).toBe(31)
+  })
+
+  it('reports no tag breakdown for a refused run', () => {
+    // The same guarantee as `features` on a refusal, migration 0014's copy of the trigger
+    // 0007 put on the statistical results (see `analysis-run.test.ts`'s "publishes no tag
+    // breakdown" test for the write side of this).
+    expect(latest.b?.tagBreakdowns).toEqual([])
+  })
+
   it('never returns another workspace run, and never another run feature results', async () => {
     // A and B both have runs; A's is published with five feature rows and B's is a refusal.
     // If the policy on either table stopped resolving, B would read A's findings.
@@ -380,5 +451,13 @@ describe('getLatestAnalysis', () => {
        where r.workspace_id <> a.workspace_id`,
     )
     expect(orphan?.n).toBe(0)
+
+    const [orphanTags] = await db.query<{ n: number }>(
+      `select count(*)::int as n
+       from public.analysis_tag_results r
+       join public.analysis_runs a on a.id = r.analysis_run_id
+       where r.workspace_id <> a.workspace_id`,
+    )
+    expect(orphanTags?.n).toBe(0)
   })
 })

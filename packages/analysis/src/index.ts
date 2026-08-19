@@ -55,5 +55,7 @@ export type {
 export { CONFIDENCE_ALPHA, naivePooledEstimate, withinAdvertiserRegression } from './regression.ts'
 export type { FinishedAd, NaiveEstimate, WithinAdvertiserRegression } from './regression.ts'
 export { regularizedIncompleteBeta, studentTCritical, twoSidedStudentP } from './student-t.ts'
+export { describeTagDistribution, HOOK_TYPES, TONES } from './tag-distribution.ts'
+export type { DescriptiveTag, TagBreakdown, TagValueCount } from './tag-distribution.ts'
 export { vanElteren } from './van-elteren.ts'
 export type { ContrastResult, Stratum } from './van-elteren.ts'

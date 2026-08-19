@@ -38,6 +38,8 @@ const creative = (over: Partial<PanelCreative> = {}): PanelCreative => ({
     audio_energy_variance: 0.02,
   },
   skippedFeatures: [],
+  hookType: null,
+  tone: null,
   ...over,
 })
 
@@ -153,6 +155,19 @@ describe('assembly', () => {
       'long-2',
       'long-3',
     ])
+  })
+
+  // UC-8's two descriptive tags ride along on the member the same way `features` does — read
+  // by `describeTagDistribution`, never by `stratify`, which is the whole reason they are
+  // separate fields rather than two more entries in `features`.
+  it('carries hookType and tone through onto the cohort member', () => {
+    const tagged = assembleCohorts([
+      creative({ creativeId: 'long-tagged', daysActive: 90, hookType: 'demo', tone: 'urgente' }),
+    ])
+    expect(tagged.members[0]).toMatchObject({ hookType: 'demo', tone: 'urgente' })
+
+    const untagged = assembleCohorts([creative({ creativeId: 'long-untagged', daysActive: 90 })])
+    expect(untagged.members[0]).toMatchObject({ hookType: null, tone: null })
   })
 
   it('counts strata over cohort members only, not over the panel', () => {
@@ -388,7 +403,7 @@ describe('stratification', () => {
 })
 
 describe('the feature list', () => {
-  it('is the six structural features, in one order', () => {
+  it('is the six structural features plus the UC-8 semantic tag, in one order', () => {
     // Pinned rather than asserted by length. This array is the contract the DB check
     // constraint, the results table and the UI all key off; a silent reorder or rename here
     // is a relabelling that no assertion on the numbers themselves would catch.
@@ -399,6 +414,7 @@ describe('the feature list', () => {
       'text_in_first_2s',
       'text_density',
       'audio_energy_variance',
+      'has_people_on_screen',
     ])
   })
 })

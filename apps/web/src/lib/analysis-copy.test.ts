@@ -1,8 +1,16 @@
-import { ANALYSIS_FEATURES, type AnalysisFeature, type GateId } from '@mini-crux/analysis'
+import {
+  ANALYSIS_FEATURES,
+  HOOK_TYPES,
+  TONES,
+  type AnalysisFeature,
+  type DescriptiveTag,
+  type GateId,
+} from '@mini-crux/analysis'
 import { describe, expect, it } from 'vitest'
 
 import {
   CONFOUNDER_CAVEAT,
+  DESCRIPTIVE_TAG_NOTE,
   effectLabel,
   featureLabel,
   isSignal,
@@ -12,8 +20,18 @@ import {
   SIGNAL_Q,
   signalLabel,
   superiorityLabel,
+  tagLabel,
+  tagValueLabel,
   UNTESTED_NOTE,
 } from './analysis-copy.ts'
+
+/**
+ * UC-8's two descriptive tags. Not exported from `@mini-crux/analysis` as an array — only the
+ * union type is — so it is restated here the same way `GATES` restates `GateId`'s members: a
+ * third tag added to the type without a matching entry in this array is a type error where it
+ * is written, not a silent gap in `everyString()`.
+ */
+const TAGS: DescriptiveTag[] = ['hook_type', 'tone']
 
 /**
  * The detail each gate stores, keyed so the compiler can see a gate is missing.
@@ -44,6 +62,17 @@ const everyString = (): string[] => [
   UNTESTED_NOTE,
   signalLabel(0.01),
   signalLabel(0.5),
+  // UC-8's descriptive breakdown. Deliberately included here rather than swept only in its own
+  // describe block below: the banned-vocabulary check is the one test that must hold across
+  // the *whole* surface, and a taxonomy added to `tag-distribution.ts` without its Spanish copy
+  // being pulled into this list would ship unswept — exactly the gap `TAG_COPY`'s own comment
+  // in analysis-copy.ts defers to this task.
+  ...TAGS.map(tagLabel),
+  ...HOOK_TYPES.map((value) => tagValueLabel('hook_type', value)),
+  ...TONES.map((value) => tagValueLabel('tone', value)),
+  tagValueLabel('hook_type', 'untagged'),
+  tagValueLabel('tone', 'untagged'),
+  DESCRIPTIVE_TAG_NOTE,
 ]
 
 describe('the words the product is not entitled to use', () => {
@@ -92,6 +121,71 @@ describe('featureLabel', () => {
 
   it('gives each feature its own label', () => {
     expect(new Set(ANALYSIS_FEATURES.map(featureLabel)).size).toBe(ANALYSIS_FEATURES.length)
+  })
+})
+
+describe('tagLabel', () => {
+  it('names both declared tags', () => {
+    for (const tag of TAGS) {
+      const label = tagLabel(tag)
+      expect(label).toBeTruthy()
+      expect(label).not.toContain('undefined')
+    }
+  })
+
+  it('gives each tag its own label', () => {
+    expect(new Set(TAGS.map(tagLabel)).size).toBe(TAGS.length)
+  })
+})
+
+describe('tagValueLabel', () => {
+  it('names every declared value of both taxonomies', () => {
+    // Mirrors `featureLabel`'s own test: indexed by the literal union, so a renamed taxonomy
+    // value would fall back to `undefined` at runtime under a looser lookup even though the
+    // compiler saw nothing wrong.
+    for (const value of HOOK_TYPES) {
+      const label = tagValueLabel('hook_type', value)
+      expect(label).toBeTruthy()
+      expect(label).not.toContain('undefined')
+    }
+    for (const value of TONES) {
+      const label = tagValueLabel('tone', value)
+      expect(label).toBeTruthy()
+      expect(label).not.toContain('undefined')
+    }
+  })
+
+  it('gives each value its own label within a taxonomy', () => {
+    // Within, not across: hook_type and tone are free to reuse a Spanish word (both have an
+    // 'other' → 'Otro'), and testing the two taxonomies' values as one combined set would fail
+    // on that legitimate overlap instead of catching a real collision.
+    expect(new Set(HOOK_TYPES.map((v) => tagValueLabel('hook_type', v))).size).toBe(HOOK_TYPES.length)
+    expect(new Set(TONES.map((v) => tagValueLabel('tone', v))).size).toBe(TONES.length)
+  })
+
+  it('renders untagged as its own caption, never the raw column value', () => {
+    // The db layer stores the literal string 'untagged' as a real taxonomy row (see
+    // analysis-schema.test.ts's "treats untagged as one taxonomy row, not a null the unique
+    // constraint would miss twice") precisely so this has something to translate rather than a
+    // null to special-case — and the caption must say so in Spanish, not echo the column value.
+    expect(tagValueLabel('hook_type', 'untagged')).toBe('Sin etiquetar')
+    expect(tagValueLabel('tone', 'untagged')).toBe('Sin etiquetar')
+  })
+
+  it('falls back to the raw value for anything outside the taxonomy, rather than "undefined"', () => {
+    // Defensive: the taxonomy is a Postgres check constraint pinned to HOOK_TYPES/TONES, so this
+    // should never fire against real data, but a lookup that returns `undefined` on a miss would
+    // print the literal word "undefined" into an operator-facing card — worse than the raw code.
+    expect(tagValueLabel('hook_type', 'made_up_value')).toBe('made_up_value')
+  })
+})
+
+describe('DESCRIPTIVE_TAG_NOTE', () => {
+  it('says out loud that this count carries no p or q', () => {
+    // Acceptance criterion is "no p-value and no q-value attached", made visible rather than
+    // merely true by omission — a reader who has just read six cards with a q on every one
+    // should not have to notice its absence here to know none was computed.
+    expect(DESCRIPTIVE_TAG_NOTE).toContain('no lleva p ni q')
   })
 })
 

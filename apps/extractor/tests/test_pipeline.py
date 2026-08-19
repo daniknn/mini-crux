@@ -356,6 +356,11 @@ class TestPosterFrame:
         A creative with no poster still has a duration, a cut rate and a transcript, and
         those belong in the panel. The skip entry is what tells the gallery to render a
         text card rather than an image element pointing at nothing.
+
+        `encode_poster` is shared between the poster and the semantic frames (same JPEG
+        encode, different targets), so a failure here costs both — that is the correct
+        blast radius, not a leak between them: whichever one calls the broken encoder skips,
+        and nothing else does.
         """
         import extractor.pipeline as pipeline_module
 
@@ -372,7 +377,66 @@ class TestPosterFrame:
             audio=FakeAudio(),
         )
 
-        assert features.skipped_features == ["poster_storage_path"]
+        assert features.skipped_features == ["poster_storage_path", "semantic_frame_paths"]
         assert features.poster_jpeg is None
+        assert features.semantic_frame_jpegs is None
         assert features.duration_s == pytest.approx(3.0, abs=0.05)
         assert features.first_line_transcript == "primera línea"
+
+
+class TestSemanticFrames:
+    """UC-8: three frames cut from the same OCR-sampled pool `TestPosterFrame` uses.
+
+    Same fixture problem as the poster, times three: `make_video`'s equal flat scenes would
+    make hook, midpoint and near-end land in the same colour and prove nothing. Three
+    uneven, distinctly-coloured segments — one per target — make the three samples
+    distinguishable, the same fix `make_segment_video` exists for in `TestPosterFrame`.
+    """
+
+    def test_the_three_frames_land_on_hook_midpoint_and_near_end(self, tmp_path: Path) -> None:
+        # 1s each of three colours, 3s total. Worked out from the sampler's own maths
+        # (OCR frames every 0.5s, analyzed_s ~2.92s for a 3s/24fps clip): the hook target
+        # (0.5s) falls in segment 0, the midpoint (~1.46s) nearest-rounds to 1.5s in segment
+        # 1, and the near-end target (~2.92s) nearest-rounds to 2.5s in segment 2 — three
+        # different segments, three different colours.
+        video = make_segment_video(
+            tmp_path / "arc.mp4",
+            [(1.0, SCENE_PALETTE[0]), (1.0, SCENE_PALETTE[1]), (1.0, SCENE_PALETTE[2])],
+        )
+
+        features = extract(video, media_type="video", ocr=FakeOcr(), cap_s=120.0)
+
+        assert features.semantic_frame_jpegs is not None
+        assert len(features.semantic_frame_jpegs) == 3
+        hook, midpoint, near_end = (mean_bgr(decode_jpeg(jpeg)) for jpeg in features.semantic_frame_jpegs)
+
+        assert hook == pytest.approx(SCENE_PALETTE[0], abs=15)
+        assert midpoint == pytest.approx(SCENE_PALETTE[1], abs=15)
+        assert near_end == pytest.approx(SCENE_PALETTE[2], abs=15)
+        assert "semantic_frame_paths" not in features.skipped_features
+
+    def test_a_still_gets_a_single_frame_best_effort(self, tmp_path: Path) -> None:
+        # Out of scope (spec §Scope): sampling quality for a still is one frame, not three
+        # — there is no arc to sample three points from.
+        image = make_image(tmp_path / "ad.jpg")
+
+        features = extract(image, media_type="image", ocr=FakeOcr())
+
+        assert features.semantic_frame_jpegs is not None
+        assert len(features.semantic_frame_jpegs) == 1
+        assert mean_bgr(decode_jpeg(features.semantic_frame_jpegs[0])) == pytest.approx(
+            (120, 90, 60), abs=6
+        )
+        assert "semantic_frame_paths" not in features.skipped_features
+
+    def test_semantic_frame_jpegs_never_lands_in_the_features_row(self, tmp_path: Path) -> None:
+        # Transit, like `poster_jpeg`. If it reached `to_row()` the worker would try to bind
+        # three JPEGs as one `text[]` parameter instead of the storage keys.
+        features = extract(
+            make_video(tmp_path / "x.mp4", scenes=2, seconds=2.0),
+            media_type="video",
+            ocr=FakeOcr(),
+        )
+        assert features.semantic_frame_jpegs is not None
+        assert "semantic_frame_jpegs" not in features.to_row()
+        assert "semantic_frame_paths" in features.to_row()

@@ -11,7 +11,12 @@
  */
 
 import { fromPgClient } from '@mini-crux/db'
-import { createApifyProvider, createSupabaseStore } from '@mini-crux/ingestion'
+import {
+  createApifyProvider,
+  createOpenAiVlmProvider,
+  createSupabaseMediaUrlSigner,
+  createSupabaseStore,
+} from '@mini-crux/ingestion'
 import pg from 'pg'
 
 import { loadSettings, MissingConfig } from './config.ts'
@@ -42,6 +47,15 @@ async function main(): Promise<void> {
       provider: createApifyProvider({
         token: settings.apifyToken,
         actorId: settings.apifyActorId,
+      }),
+      vlmProvider: createOpenAiVlmProvider({
+        apiKey: settings.openaiApiKey,
+        model: settings.vlmModel,
+      }),
+      mediaUrlSigner: createSupabaseMediaUrlSigner({
+        supabaseUrl: settings.supabaseUrl,
+        serviceRoleKey: settings.serviceRoleKey,
+        bucket: settings.mediaBucket,
       }),
     }),
   })

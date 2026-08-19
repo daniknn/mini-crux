@@ -8,8 +8,11 @@ import {
   runCrawl,
   runParse,
   runProxyValidation,
+  runSemanticTag,
   type AdLibraryProvider,
+  type MediaUrlSigner,
   type ObjectStore,
+  type VlmProvider,
   type WatchlistKind,
 } from '@mini-crux/ingestion'
 
@@ -29,6 +32,7 @@ import type { Handlers } from './worker.ts'
  *   cron → `crawl` job → runCrawl → (enqueues) `parse` job → runParse → panel
  *   cron → `analysis` job → runAnalysis → analysis_runs
  *   operator → `proxy_validation` job → runProxyValidation → proxy_validation_runs (UC-7)
+ *   reconciler → `semantic_tag` job → runSemanticTag → creative_semantic_tags (UC-8)
  *
  * `runCrawl` already enqueues the parse job with the crawl's own `trace_id`, so the worker
  * does not chain anything itself. That is why the chaining assertion in the tests reads the
@@ -38,6 +42,11 @@ import type { Handlers } from './worker.ts'
  * `proxy_validation` has no cron entry (spec: a research instrument run deliberately, not a
  * daily tick) — it is enqueued by the `proxy-validation:once` operator CLI, same shape as
  * `crawl:once` enqueuing a `crawl` job by hand.
+ *
+ * `semantic_tag` has no cron entry either, for the same cost reason as `proxy_validation`:
+ * `app.enqueue_pending_semantic_tags` (migration 0012) is invoked deliberately by an operator
+ * (RUNBOOK), not on a schedule, because re-running it bills a VLM call per newly-eligible
+ * creative.
  */
 
 export interface HandlerDeps {
@@ -45,6 +54,8 @@ export interface HandlerDeps {
   db: SqlExecutor
   store: ObjectStore
   provider: AdLibraryProvider
+  vlmProvider: VlmProvider
+  mediaUrlSigner: MediaUrlSigner
 }
 
 /** Reads a required string out of a job payload, or refuses the job for good. */
@@ -91,6 +102,19 @@ function jobReachBound(job: JobRow): 'min' | 'max' | undefined {
     )
   }
   return value
+}
+
+/** Undefined when absent so `runSemanticTag` falls back to `SEMANTIC_SCHEMA_VERSION`. */
+function jobSchemaVersion(job: JobRow): number | undefined {
+  const value = job.payload['schema_version']
+  if (value === undefined) return undefined
+  const version = Number(value)
+  if (!Number.isInteger(version)) {
+    throw new PermanentJobError(
+      `${job.type} job ${job.id} has invalid schema_version "${String(value)}"`,
+    )
+  }
+  return version
 }
 
 export function createHandlers(deps: HandlerDeps): Handlers {
@@ -177,6 +201,24 @@ export function createHandlers(deps: HandlerDeps): Handlers {
             country: 'ES',
           },
           reachBoundUsed: jobReachBound(job),
+        },
+      )
+    },
+
+    async semantic_tag(job: JobRow): Promise<void> {
+      // Not wrapped in `withIdempotency`: `runSemanticTag` guards itself with a query-based
+      // precheck against `creative_semantic_tags`' own unique key, same reasoning as `crawl`
+      // and `proxy_validation` above — it calls the VLM provider over the network, and here
+      // that call also costs money, which is exactly why the precheck runs before it rather
+      // than only guarding the write.
+      await runSemanticTag(
+        { db: deps.db, provider: deps.vlmProvider, mediaUrlSigner: deps.mediaUrlSigner },
+        {
+          workspaceId: job.workspaceId,
+          traceId: job.traceId as TraceId,
+          actor: jobActor(job),
+          creativeId: requiredString(job, 'creative_id'),
+          schemaVersion: jobSchemaVersion(job),
         },
       )
     },

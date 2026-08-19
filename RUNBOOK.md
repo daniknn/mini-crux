@@ -13,7 +13,7 @@ amount of later work reconstructs it. Every urgency in this document derives fro
 
 | Piece | Platform | What it does | Owns migrations |
 |---|---|---|---|
-| `mini-crux-worker` | Fly.io (`qro`) | Claims `crawl`, `parse`, `analysis`, `proxy_validation` jobs | **Yes** — release command |
+| `mini-crux-worker` | Fly.io (`qro`) | Claims `crawl`, `parse`, `analysis`, `proxy_validation`, `semantic_tag` jobs | **Yes** — release command |
 | `mini-crux-extractor` | Fly.io (`qro`) | Claims `extract` jobs (video features) | No |
 | `@mini-crux/web` | Vercel (`qro1`) | Dashboard + `/api/health/ingestion` | No |
 | Postgres + `pg_cron` | Supabase | The clock and the data | — |
@@ -41,6 +41,12 @@ succeeded by 16:00 the analysis tick enqueues nothing and yesterday's published 
 data can be backfilled from one scrape — there is no daily tick to backfill for, and adding one
 would imply this is a panel to maintain rather than a research instrument to run once in a
 while. See *Run the ES proxy validation* in §5.
+
+`semantic_tag` (UC-8) is deliberately **absent** too, for a different reason: a VLM call costs
+money per creative, where a crawl or a re-analysis does not. Auto-enqueueing it on the same
+clock as extraction would mean an unbounded, recurring API bill for creatives that were already
+tagged at the current taxonomy version. `app.enqueue_pending_semantic_tags` exists precisely so
+this stays an operator decision — see *Run the semantic tagging backlog* in §5.
 
 ```sql
 select jobname, schedule, active from cron.job order by jobname;
@@ -256,6 +262,12 @@ app gets `SUPABASE_DB_AUTHENTICATOR_URL` and never the former. Handing the web a
 worker's URL serves every workspace's panel to everyone — with a green test suite, because
 the tests connect as `authenticated`.
 
+**`OPENAI_API_KEY`** (worker only) backs the VLM provider for `semantic_tag` jobs — fails fast
+at startup if absent (`apps/worker/src/config.ts`), same as every other required setting.
+`VLM_MODEL` is optional and defaults to `gpt-4o-mini`; changing it does **not** need a taxonomy
+version bump (§5) — `SEMANTIC_SCHEMA_VERSION` tracks the prompt and taxonomy, not the model
+that answers it.
+
 ### Rotating one
 
 Change it in Doppler, then make each platform pick it up. Neither reads Doppler at runtime —
@@ -408,6 +420,50 @@ asking about the MX panel and belongs in a different section. The verdict change
 `/validacion-proxy` page *says*, never what UC-5 computes: no MX gate, threshold or copy reads
 it automatically, and none should be made to.
 
+**Run the semantic tagging backlog (UC-8).** Not cron-scheduled (§1) — each call spends real
+money, one VLM call per newly-eligible creative, so it is an operator decision rather than a
+tick. The argument is the current `SEMANTIC_SCHEMA_VERSION`:
+```sql
+select app.enqueue_pending_semantic_tags(1);
+```
+Returns the number of `semantic_tag` jobs created. It only considers creatives whose
+`creative_features` row is current (`not is_stale`) and has `semantic_frame_paths` — tagging
+cannot run ahead of frames the extractor has not produced yet, so a fresh crawl needs a normal
+extraction pass to finish first. **`0` is the normal answer once the panel is fully tagged at
+that version**, same reading as `enqueue_daily_analysis` — it is not a failure. Re-running it
+is safe: the `where not exists` clause against both `creative_semantic_tags` and in-flight
+`jobs` rows means a second call the same afternoon costs nothing extra, it just finds nothing
+left to enqueue.
+
+**Re-tag everything after a taxonomy or prompt change.** `SEMANTIC_SCHEMA_VERSION`
+(`packages/ingestion/src/semantic-tagging.ts`) bumps only when the prompt or the `hook_type` /
+`tone` taxonomy itself changes — never for a model swap that leaves the question asked
+unchanged (see `VLM_MODEL` in §4). Same two-step shape as the extractor's `--bump-version`:
+first mark every row below the new version stale, then let the reconciler above queue their
+replacements:
+```sql
+select app.mark_semantic_tags_stale(2);
+select app.enqueue_pending_semantic_tags(2);
+```
+Split in two on purpose: staleness is a fact about the existing rows and has to be recorded
+even if the worker is down or the re-tag never runs, so a superseded taxonomy never presents
+as current in the meantime. The old rows are not deleted — `is_stale = true`, readable, same
+lifecycle as `creative_features.is_stale` — so a taxonomy change is auditable, not just applied.
+
+**Read a creative's current tags:**
+```sql
+select creative_id, schema_version, has_people_on_screen, hook_type, tone, skipped_tags,
+       vlm_provider, vlm_model, is_stale
+from public.creative_semantic_tags
+where creative_id = '<id>'
+order by schema_version desc;
+```
+A `null` in `has_people_on_screen`/`hook_type`/`tone` with a matching entry in `skipped_tags`
+means the model declined that specific field — not that it answered false/empty. `raw_response`
+on the same row is the untouched provider payload (land raw, parse later, domain rule 2, applied
+to a model response) — the first place to look when a parsed field looks wrong, since a
+reprocess against that column costs nothing further, unlike a second VLM call.
+
 ---
 
 ## 6. What cannot be recovered
@@ -433,3 +489,10 @@ next day's crawl.
 - **Extraction features recorded as `skipped`.** A model backend was unavailable and the
   pipeline degraded per feature instead of failing the job. Check the image has the `ml`
   extra if *every* creative skips the same feature.
+- **A `creative_semantic_tags` row with one or two fields null and named in `skipped_tags`.**
+  The VLM declined that specific field rather than guessing — the job still succeeded and wrote
+  whatever it did answer. Only worth a look if *every* row skips the *same* field, which points
+  at the prompt rather than any one creative.
+- **`creative_semantic_tags.is_stale = true` rows sitting around after a taxonomy bump.** They
+  are superseded, not orphaned — kept for audit, same as `creative_features.is_stale`. They stop
+  once `enqueue_pending_semantic_tags` finishes the backlog for the new version.

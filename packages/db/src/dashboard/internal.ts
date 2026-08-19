@@ -60,3 +60,34 @@ export const LATEST_FEATURES = `
     order by f.schema_version desc
     limit 1
   ) f on true`
+
+/**
+ * The current semantic-tags row for a creative, or nothing (UC-8).
+ *
+ * Same shape as {@link LATEST_FEATURES} and the same reason: `creative_semantic_tags` is
+ * unique on `(creative_id, schema_version)`, a taxonomy bump marks older rows `is_stale`
+ * rather than deleting them, and ordering by `schema_version desc` rather than trusting the
+ * flag alone means a half-finished re-tag shows the newest judgment instead of letting the
+ * planner choose between two current-looking rows.
+ *
+ * A creative with no row here — never tagged, or its only row superseded — joins to a null
+ * `has_people_on_screen`, which `panel.ts` folds into `skipped_features` alongside a model's
+ * explicit "unclear": both mean *this run has no value to correlate*, and the contrast engine
+ * does not need to tell them apart.
+ *
+ * `hook_type` and `tone` ride along on the same row for the same reason `has_people_on_screen`
+ * does — one tagging pass produces all three — but they are read differently downstream: no
+ * cast, because they stay text all the way to `describeTagDistribution`, which counts them
+ * rather than ranking them (UC-8 spec §6).
+ */
+export const LATEST_SEMANTIC_TAGS = `
+  left join lateral (
+    select t.has_people_on_screen,
+           t.hook_type,
+           t.tone
+    from public.creative_semantic_tags t
+    where t.creative_id = s.creative_id
+      and not t.is_stale
+    order by t.schema_version desc
+    limit 1
+  ) t on true`

@@ -1,6 +1,6 @@
 import { ANALYSIS_FEATURES, type PanelCreative } from '@mini-crux/analysis'
 
-import { asDate, LATEST_FEATURES } from '../dashboard/internal.ts'
+import { asDate, LATEST_FEATURES, LATEST_SEMANTIC_TAGS } from '../dashboard/internal.ts'
 import type { SqlExecutor } from '../types.ts'
 
 /**
@@ -55,6 +55,10 @@ interface PanelRow {
   text_in_first_2s: number | null
   text_density: number | null
   audio_energy_variance: number | null
+  has_people_on_screen: number | null
+  /** UC-8's descriptive tags. No `?? null` fallback needed downstream: SQL already nulls it. */
+  hook_type: string | null
+  tone: string | null
 }
 
 export async function getAnalysisPanel(
@@ -83,8 +87,16 @@ export async function getAnalysisPanel(
             -- Coalesced because a creative with no feature row joins to all-nulls, and an
             -- absent array must read as "nothing was skipped" rather than as a null the
             -- caller has to re-interpret. The creative is excluded upstream either way, by
-            -- its null feature_schema_version.
-            coalesce(f.skipped_features, '{}') as skipped_features,
+            -- its null feature_schema_version. has_people_on_screen is folded in here too:
+            -- a creative never tagged, or one whose tag row exists but declined the field,
+            -- both join to a null t.has_people_on_screen -- the panel cannot tell a missing
+            -- row from a model's "unclear", and (per UC-8 par.4) it should not have to, since
+            -- both mean the same thing to stratify: not measurable, drop from this feature.
+            coalesce(f.skipped_features, '{}')
+              || case when t.has_people_on_screen is null
+                       then array['has_people_on_screen']
+                       else '{}'::text[]
+                  end                        as skipped_features,
             f.duration_s,
             f.first_cut_time_s,
             f.cuts_per_second,
@@ -94,9 +106,21 @@ export async function getAnalysisPanel(
             -- tying this produces is exactly what the tie-corrected variance is for.
             f.text_in_first_2s::int         as text_in_first_2s,
             f.text_density,
-            f.audio_energy_variance
+            f.audio_energy_variance,
+            -- Same cast, same reason, one join over: creative_semantic_tags rather than
+            -- creative_features (see LATEST_SEMANTIC_TAGS) -- a second, independently
+            -- versioned table, but a boolean is a boolean and the rank test does not care
+            -- which table it came from.
+            t.has_people_on_screen::int     as has_people_on_screen,
+            -- No cast, and no fold into skipped_features. hook_type/tone never reach
+            -- stratify/vanElteren -- describeTagDistribution reads them straight off the
+            -- cohort member and counts a null as untagged itself (UC-8 spec Sec6), so there is
+            -- no rank test here that a skip entry needs to steer around.
+            t.hook_type,
+            t.tone
      from public.creative_survival s
      ${LATEST_FEATURES}
+     ${LATEST_SEMANTIC_TAGS}
      where s.workspace_id = $1
      -- Deterministic, so a re-run over an unchanged panel builds byte-identical strata and
      -- any difference between two runs is a difference in the panel.
@@ -124,6 +148,8 @@ export async function getAnalysisPanel(
     // fallback keeps the suite green while production reads a null it was told could not
     // arrive.
     skippedFeatures: row.skipped_features,
+    hookType: row.hook_type,
+    tone: row.tone,
   }))
 }
 

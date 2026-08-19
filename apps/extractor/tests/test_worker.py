@@ -15,7 +15,7 @@ import pytest
 
 from extractor import media as media_module
 from extractor.features import FEATURE_SCHEMA_VERSION
-from extractor.media import MemoryMediaStore, media_path, poster_path
+from extractor.media import MemoryMediaStore, media_path, poster_path, semantic_frame_path
 from extractor.store import Creative
 from extractor.testing import (
     FakeAudio,
@@ -24,6 +24,7 @@ from extractor.testing import (
     FlakyMediaStore,
     MemoryJobStore,
     PosterHostileMediaStore,
+    SemanticFrameHostileMediaStore,
     SlowMediaStore,
     drain,
     make_corrupt,
@@ -544,3 +545,136 @@ class TestPosterUpload:
         row = store.features[("cr_1", nxt)]
         assert row.features.poster_storage_path is not None
         assert "poster_storage_path" not in row.features.skipped_features
+
+
+class TestSemanticFrameUpload:
+    """The three semantic frames, uploaded and recorded the same way the poster is.
+
+    One difference from the poster worth stating up front: `semantic_frame_paths` is one
+    array column, so a partial failure (two of three frames land, one doesn't) is a skip
+    for the whole feature — never a shorter array pointing at objects that do not all
+    exist. `_store_semantic_frames` enforces that; these tests prove it end to end.
+    """
+
+    def semantic_keys(self, media_store: MemoryMediaStore) -> list[str]:
+        keys = sorted(k for k in media_store.objects if ".semantic." in k)
+        assert len(keys) == 3, f"expected exactly three semantic frames, got {keys}"
+        return keys
+
+    async def test_the_frames_land_beside_the_media_and_the_row_points_at_them(
+        self, video_bytes: bytes
+    ) -> None:
+        store, media_store = MemoryJobStore(), MemoryMediaStore()
+        seed_creative(store, media_store, creative_id="cr_1", body=video_bytes)
+        store.enqueue(creative_id="cr_1", workspace_id=WORKSPACE, message_id="msg_1")
+        worker = build_worker(store, media_store)
+
+        await worker.run_once()
+        worker.close()
+
+        stored = store.features[("cr_1", FEATURE_SCHEMA_VERSION)]
+        expected = [
+            semantic_frame_path(stored.media.path, FEATURE_SCHEMA_VERSION, index)
+            for index in range(3)
+        ]
+
+        # The exact three keys in order, not "three keys somewhere": the tagging job reads
+        # index 0/1/2 as hook/midpoint/near-end, so the array order is part of the contract.
+        assert stored.features.semantic_frame_paths == expected
+        assert self.semantic_keys(media_store) == sorted(expected)
+        for key in expected:
+            assert media_store.content_types[key] == "image/jpeg"
+            assert media_store.objects[key][:2] == b"\xff\xd8"  # JPEG SOI
+        assert "semantic_frame_paths" not in stored.features.skipped_features
+
+    async def test_the_frame_keys_carry_the_schema_version(self, video_bytes: bytes) -> None:
+        """Same reasoning as the poster: without the version, a re-extraction's `put` would
+        hit write-once against the prior version's frames and silently keep the old ones."""
+        store, media_store = MemoryJobStore(), MemoryMediaStore()
+        seed_creative(store, media_store, creative_id="cr_1", body=video_bytes)
+        store.enqueue(creative_id="cr_1", workspace_id=WORKSPACE, message_id="msg_1")
+        worker = build_worker(store, media_store)
+        await worker.run_once()
+
+        first = self.semantic_keys(media_store)
+
+        nxt = FEATURE_SCHEMA_VERSION + 1
+        store.mark_stale(below_version=nxt)
+        store.enqueue(
+            creative_id="cr_1", workspace_id=WORKSPACE, message_id="msg_2", schema_version=nxt
+        )
+        await worker.run_once()
+        worker.close()
+
+        second = store.features[("cr_1", nxt)].features.semantic_frame_paths
+        assert second is not None
+        assert set(second).isdisjoint(first)
+        assert second == [
+            semantic_frame_path(store.features[("cr_1", nxt)].media.path, nxt, index)
+            for index in range(3)
+        ]
+        assert all(path in media_store.objects for path in second)
+
+    async def test_a_storage_outage_leaves_a_null_and_a_skip_not_a_partial_array(
+        self, video_bytes: bytes
+    ) -> None:
+        store, inner = MemoryJobStore(), MemoryMediaStore()
+        seed_creative(store, inner, creative_id="cr_1", body=video_bytes)
+        media_store = SemanticFrameHostileMediaStore(inner)
+        store.enqueue(creative_id="cr_1", workspace_id=WORKSPACE, message_id="msg_1")
+        worker = build_worker(store, media_store)
+
+        assert await worker.run_once() is True
+        worker.close()
+
+        # The hostile store refuses every `.semantic.` put, so the very first of the three
+        # uploads fails — this is the all-or-nothing case, not merely "at least one failed".
+        assert media_store.refused == 1
+        assert store.job("job_1")["status"] == "succeeded"
+
+        stored = store.features[("cr_1", FEATURE_SCHEMA_VERSION)]
+        assert stored.features.semantic_frame_paths is None
+        assert "semantic_frame_paths" in stored.features.skipped_features
+        assert not any(".semantic." in k for k in inner.objects)
+
+        # The poster and every measured feature survived a failure confined to frame
+        # sampling — the outage cost one column, not the row.
+        assert stored.features.poster_storage_path is not None
+        assert stored.features.duration_s == pytest.approx(3.0, abs=0.05)
+        assert stored.features.cuts_per_second is not None
+        assert stored.features.skipped_features == ["semantic_frame_paths"]
+
+    async def test_frames_already_in_storage_are_not_an_error(self, video_bytes: bytes) -> None:
+        """Two workers on one creative encode the same three frames to the same three keys.
+
+        Same race as the poster: the second writer to land loses `put` but must still
+        finish the job and still record all three paths, because the bytes it would have
+        written are the bytes already there — the frame is deterministic per schema version.
+        """
+        store, media_store = MemoryJobStore(), MemoryMediaStore()
+        seed_creative(store, media_store, creative_id="cr_1", body=video_bytes)
+        store.enqueue(creative_id="cr_1", workspace_id=WORKSPACE, message_id="msg_1")
+        worker = build_worker(store, media_store)
+        await worker.run_once()
+
+        expected = self.semantic_keys(media_store)
+        for key in expected:
+            media_store.objects[key] = b"\xff\xd8 written by the other worker"
+
+        nxt = FEATURE_SCHEMA_VERSION + 1
+        store.mark_stale(below_version=nxt)
+        store.enqueue(
+            creative_id="cr_1", workspace_id=WORKSPACE, message_id="msg_2", schema_version=nxt
+        )
+        media_path_value = media_path(WORKSPACE, "tuple:cr_1", "https://x/ad.mp4", "video")
+        for index in range(3):
+            media_store.objects[semantic_frame_path(media_path_value, nxt, index)] = (
+                b"\xff\xd8 squatted"
+            )
+        assert await worker.run_once() is True
+        worker.close()
+
+        row = store.features[("cr_1", nxt)]
+        assert row.features.semantic_frame_paths is not None
+        assert len(row.features.semantic_frame_paths) == 3
+        assert "semantic_frame_paths" not in row.features.skipped_features

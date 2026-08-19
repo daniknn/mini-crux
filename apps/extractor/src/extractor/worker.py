@@ -25,7 +25,15 @@ from pathlib import Path
 
 from .backends import AudioBackend, OcrBackend, TranscriptBackend
 from .features import FEATURE_SCHEMA_VERSION, CreativeFeatures
-from .media import LandedMedia, MediaFetchError, MediaStore, land, land_poster, poster_path
+from .media import (
+    LandedMedia,
+    MediaFetchError,
+    MediaStore,
+    land,
+    land_poster,
+    poster_path,
+    semantic_frame_path,
+)
 from .pipeline import DEFAULT_CAP_S, extract
 from .store import Creative, DuplicateMessage, Job, JobStore
 from .video import UnreadableMedia
@@ -225,6 +233,7 @@ class ExtractWorker:
 
         features.schema_version = schema_version
         self._store_poster(features, media)
+        self._store_semantic_frames(features, media)
         return features, media
 
     def _store_poster(self, features: CreativeFeatures, media: LandedMedia) -> None:
@@ -252,3 +261,31 @@ class ExtractWorker:
         except Exception:
             logger.warning("could not store poster for %s", media.path, exc_info=True)
             features.skip("poster_storage_path")
+
+    def _store_semantic_frames(self, features: CreativeFeatures, media: LandedMedia) -> None:
+        """Upload the sampled frames and record their paths. Never fails the job.
+
+        All-or-nothing, unlike the poster's single column: `semantic_frame_paths` is one
+        array, and writing a partial list would leave the tagging job reading a path for a
+        frame that never made it to storage — the same broken-image failure mode
+        `_store_poster` avoids, just multiplied by three. A storage outage partway through
+        the uploads is therefore a skip for the whole feature, not a shorter array.
+        """
+        if not features.semantic_frame_jpegs:
+            return
+
+        try:
+            paths = [
+                land_poster(
+                    self._media_store,
+                    semantic_frame_path(media.path, features.schema_version, index),
+                    jpeg,
+                )
+                for index, jpeg in enumerate(features.semantic_frame_jpegs)
+            ]
+        except Exception:
+            logger.warning("could not store semantic frames for %s", media.path, exc_info=True)
+            features.skip("semantic_frame_paths")
+            return
+
+        features.semantic_frame_paths = paths

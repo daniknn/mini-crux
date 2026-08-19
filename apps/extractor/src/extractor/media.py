@@ -78,13 +78,28 @@ def poster_path(media_path_value: str, schema_version: int) -> str:
     return f"{stem}.poster.v{schema_version}.jpg"
 
 
+def semantic_frame_path(media_path_value: str, schema_version: int, index: int) -> str:
+    """`{media path without extension}.semantic.v{n}.{index}.jpg`, one per sampled frame.
+
+    Same versioning reasoning as `poster_path`: a frame is a product of a schema version,
+    and a bump re-extracts rather than overwrites the old one. `index` (0=hook, 1=midpoint,
+    2=near-end) is the only difference from the poster's key — there is more than one JPEG
+    per (creative, schema_version) here, so the key needs a slot as well as a version.
+    """
+    path = PurePosixPath(media_path_value)
+    stem = str(path.with_suffix("")) if path.suffix else media_path_value
+    return f"{stem}.semantic.v{schema_version}.{index}.jpg"
+
+
 def land_poster(store: MediaStore, path: str, data: bytes) -> str:
-    """Store the poster JPEG, tolerating the object already being there.
+    """Store a cut JPEG (poster or semantic frame), tolerating the object already being there.
 
     Two workers can hold the same creative — a reaped job that was in fact still healthy is
     the ordinary way it happens — and they encode the same frame to the same key. The
     second one losing the race is not an error: the bytes it would have written are the
-    bytes already there, because the poster is deterministic for a given schema version.
+    bytes already there, because a frame cut at a given target is deterministic for a given
+    schema version. Reused for semantic frames as well as the poster: both are "cut one
+    frame to a versioned key", and the write-once tolerance is identical either way.
     """
     try:
         store.put(path, data, content_type="image/jpeg")

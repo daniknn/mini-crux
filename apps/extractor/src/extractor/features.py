@@ -23,10 +23,11 @@ from typing import Any
 # Bump this whenever any threshold below changes, or a feature is added or removed.
 # `app.mark_features_stale()` then marks prior rows stale and the reconciler re-extracts.
 #
-# v2 adds the poster frame (UC-4). The bump is not ceremony: every v1 row has no poster, and
-# a bump is the only mechanism that gets one — the reconciler re-reads the media UC-2 landed
-# immutably, which is exactly why the bytes were kept rather than the signed URL.
-FEATURE_SCHEMA_VERSION = 2
+# v2 adds the poster frame (UC-4). v3 adds semantic frame sampling (UC-8): three JPEGs cut
+# from the same decode pass, gating app.enqueue_pending_semantic_tags. Same reasoning both
+# times — the bump is not ceremony, it is the only mechanism that back-fills a column that
+# did not exist when older rows were written, by re-reading the media UC-2 landed immutably.
+FEATURE_SCHEMA_VERSION = 3
 
 # --- Cut detection -----------------------------------------------------------------
 # Frames are converted to grayscale and downscaled before differencing, so the threshold
@@ -59,6 +60,13 @@ OCR_MIN_CONFIDENCE = 0.4
 # extraction cost; a long ad should get sparser sampling, not a longer job.
 OCR_MAX_FRAMES = 60
 
+# --- Semantic frames -----------------------------------------------------------------
+# Three targets cut from the same OCR-sampled frame pool `video.analyze()` already
+# retains (spec rule 1: no second video read). The hook target mirrors the "@0.5s" the UC-8
+# spec names literally; midpoint and near-end are computed from `analyzed_s` in the
+# pipeline, so only the one fixed timestamp needs a name here.
+SEMANTIC_HOOK_FRAME_S = 0.5
+
 # --- Poster frame ------------------------------------------------------------------
 # Where in the ad to cut the gallery thumbnail from, when there is no detected cut to
 # halve. Not t=0: the first frame of an Ad Library re-encode is very often black or a
@@ -89,6 +97,7 @@ DEFINITIONS: dict[str, Any] = {
     "cut_frame_width": CUT_FRAME_WIDTH,
     "cut_sample_fps": CUT_SAMPLE_FPS,
     "min_cut_gap_s": MIN_CUT_GAP_S,
+    "semantic_hook_frame_s": SEMANTIC_HOOK_FRAME_S,
     "hook_window_s": HOOK_WINDOW_S,
     "ocr_sample_interval_s": OCR_SAMPLE_INTERVAL_S,
     "ocr_min_confidence": OCR_MIN_CONFIDENCE,
@@ -127,6 +136,7 @@ MEASURABLE_FEATURES = (
     "full_transcript",
     "audio_energy_variance",
     "poster_storage_path",
+    "semantic_frame_paths",
 )
 
 
@@ -153,6 +163,11 @@ class CreativeFeatures:
     #: buckets, and a path recorded for an object that failed to upload is a broken image
     #: in the gallery with a non-null column swearing there is one.
     poster_storage_path: str | None = None
+    #: Storage keys of the three sampled JPEGs (hook, midpoint, near-end), filled in by the
+    #: worker once all three are uploaded — same two-phase discipline as the poster, and for
+    #: the same reason: a path recorded before the upload succeeds is a broken image the
+    #: schema would otherwise call fine.
+    semantic_frame_paths: list[str] | None = None
 
     analysis_cap_s: float | None = None
     truncated: bool = False
@@ -162,6 +177,11 @@ class CreativeFeatures:
     #: The encoded poster, in transit between the pipeline and the upload. Excluded from
     #: `to_row()` — it is the payload the column points at, not a column.
     poster_jpeg: bytes | None = field(default=None, metadata={"row": False})
+    #: The three encoded semantic frames, in transit. Same transit discipline as
+    #: `poster_jpeg`, and the same reason it is a list rather than three named fields: the
+    #: pipeline produces them together from one frame pool and the worker uploads them
+    #: together, so there is never a reason to address one independently of the others.
+    semantic_frame_jpegs: list[bytes] | None = field(default=None, metadata={"row": False})
 
     def skip(self, *names: str) -> None:
         """Record that a feature could not be measured, without failing the extraction."""

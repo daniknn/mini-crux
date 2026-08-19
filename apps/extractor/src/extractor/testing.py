@@ -454,6 +454,32 @@ class PosterHostileMediaStore:
         return self._inner.get(path)
 
 
+class SemanticFrameHostileMediaStore:
+    """Accepts every write except the semantic frames'. Poster's mirror image.
+
+    Same narrowing reasoning as `PosterHostileMediaStore`, aimed at the other JPEGs the
+    worker uploads: failing only `.semantic.` keys proves the poster and every measured
+    feature survive a storage outage confined to frame sampling, and that the failure costs
+    the whole array rather than a partial one (`_store_semantic_frames` is all-or-nothing).
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.refused = 0
+
+    def exists(self, path: str) -> bool:
+        return self._inner.exists(path)
+
+    def put(self, path: str, data: bytes, *, content_type: str) -> None:
+        if ".semantic." in path:
+            self.refused += 1
+            raise RuntimeError("storage unavailable")
+        self._inner.put(path, data, content_type=content_type)
+
+    def get(self, path: str) -> bytes:
+        return self._inner.get(path)
+
+
 async def drain(worker: Any, limit: int = 50) -> int:
     """Run jobs until the queue reports empty. Returns how many were processed."""
     processed = 0

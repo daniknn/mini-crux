@@ -33,6 +33,7 @@ from .features import (
     FEATURE_SCHEMA_VERSION,
     HOOK_WINDOW_S,
     POSTER_FALLBACK_S,
+    SEMANTIC_HOOK_FRAME_S,
     CreativeFeatures,
 )
 from .video import UnreadableMedia, analyze, encode_poster, nearest_frame, read_image
@@ -110,6 +111,13 @@ def _extract_video(
         ("poster_storage_path",),
         lambda: _run_poster(features, analysis.ocr_frames, _poster_target_s(features)),
     )
+    _guard(
+        features,
+        ("semantic_frame_paths",),
+        lambda: _run_semantic_frames(
+            features, analysis.ocr_frames, _semantic_frame_targets(denominator)
+        ),
+    )
 
     return features
 
@@ -130,6 +138,18 @@ def _poster_target_s(features: CreativeFeatures) -> float:
         return POSTER_FALLBACK_S
     halved = first_cut / 2
     return halved if halved >= POSTER_FALLBACK_S else POSTER_FALLBACK_S
+
+
+def _semantic_frame_targets(analyzed_s: float) -> list[float]:
+    """Hook, midpoint, near-end — the three points an ad's arc needs (spec §1).
+
+    A single poster frame is not enough evidence for "hook type" or "tone", which are
+    claims about how the ad develops, not about one frame of it. `analyzed_s` is what was
+    actually decoded, not the full duration — same reasoning as `cuts_per_second`'s
+    denominator above — so on a truncated ad the near-end target lands inside the portion
+    we looked at rather than past it.
+    """
+    return [SEMANTIC_HOOK_FRAME_S, analyzed_s / 2, analyzed_s]
 
 
 def _extract_image(
@@ -160,6 +180,14 @@ def _extract_image(
     # A still is its own poster. Re-encoded rather than pointed at, so the gallery renders
     # one predictable size and format instead of whatever the advertiser uploaded.
     _guard(features, ("poster_storage_path",), lambda: _run_poster(features, [(0.0, frame)], 0.0))
+    # A still has no arc to sample three points from — one frame is the single-frame best
+    # effort the spec's own scope note names (out of scope: tagging quality for images
+    # beyond that), not a gap in sampling.
+    _guard(
+        features,
+        ("semantic_frame_paths",),
+        lambda: _run_semantic_frames(features, [(0.0, frame)], [0.0]),
+    )
     return features
 
 
@@ -237,6 +265,27 @@ def _run_poster(
     text card rather than an image element pointed at nothing.
     """
     features.poster_jpeg = encode_poster(nearest_frame(list(frames), target_s)[1])
+
+
+def _run_semantic_frames(
+    features: CreativeFeatures,
+    frames: list[tuple[float, object]],
+    targets: list[float],
+) -> None:
+    """Encode the semantic frames. Sets only the bytes — the worker sets the paths after
+    every upload succeeds.
+
+    Same reasoning as `_run_poster`, extended to a list: a partial upload (two of three
+    frames land, one doesn't) would leave `semantic_frame_paths` non-null but pointing at
+    an object that does not exist for one of its three entries, which is a broken image the
+    schema insists is fine. Raising here — if the frame pool is empty — is the intended
+    failure mode, not an escape hatch: `_guard` turns it into `semantic_frame_paths` in
+    `skipped_features`.
+    """
+    frame_list = list(frames)
+    features.semantic_frame_jpegs = [
+        encode_poster(nearest_frame(frame_list, target)[1]) for target in targets
+    ]
 
 
 def _run_audio(

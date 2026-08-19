@@ -1,4 +1,4 @@
-import { ANALYSIS_FEATURES, type AnalysisFeature } from '@mini-crux/analysis'
+import { ANALYSIS_FEATURES, type AnalysisFeature, type TagBreakdown } from '@mini-crux/analysis'
 import { getLatestAnalysis, type AnalysisFeatureResult, type LatestAnalysis } from '@mini-crux/db/dashboard'
 
 import { EmptyState } from '../../../components/empty-state.tsx'
@@ -12,6 +12,7 @@ import {
 } from '../../../components/ui/card.tsx'
 import {
   CONFOUNDER_CAVEAT,
+  DESCRIPTIVE_TAG_NOTE,
   effectLabel,
   featureLabel,
   isSignal,
@@ -20,6 +21,8 @@ import {
   refusalCopy,
   signalLabel,
   superiorityLabel,
+  tagLabel,
+  tagValueLabel,
   UNTESTED_NOTE,
   type Caveat,
 } from '../../../lib/analysis-copy.ts'
@@ -62,7 +65,10 @@ export default async function AnalysisPage(): Promise<React.ReactElement> {
       {analysis.outcome === 'refused' ? (
         <Refusal run={analysis} />
       ) : (
-        <Findings run={analysis} />
+        <>
+          <Findings run={analysis} />
+          <TagDistributions run={analysis} />
+        </>
       )}
       <Composition run={analysis} />
     </Page>
@@ -239,6 +245,63 @@ function UntestedCard({ feature }: { feature: AnalysisFeature }): React.ReactEle
         </div>
         <CardDescription>{UNTESTED_NOTE}</CardDescription>
       </CardHeader>
+    </Card>
+  )
+}
+
+/**
+ * `hook_type` and `tone`, each a caption rather than a claim (spec §6).
+ *
+ * Deliberately not `FindingCard` reused with different data: that card's whole shape —
+ * signal/no-signal badge, q before p, effect size — exists to present a statistic, and there
+ * is no statistic here to badge. Reusing it would either fabricate a badge for a number that
+ * was never tested or require a "hide the badge" branch that leaves the temptation to un-hide
+ * it sitting in the same component. Two cards that render two different kinds of finding stay
+ * two components.
+ */
+function TagDistributions({ run }: { run: LatestAnalysis }): React.ReactElement | null {
+  if (run.tagBreakdowns.length === 0) return null
+
+  return (
+    <div className="flex flex-col gap-4">
+      {run.tagBreakdowns.map((breakdown) => (
+        <TagDistributionCard key={breakdown.tag} breakdown={breakdown} />
+      ))}
+    </div>
+  )
+}
+
+function TagDistributionCard({ breakdown }: { breakdown: TagBreakdown }): React.ReactElement {
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center gap-3">
+          <CardTitle>{tagLabel(breakdown.tag)}</CardTitle>
+          <Badge variant="neutral">Descriptivo</Badge>
+        </div>
+        <CardDescription>{DESCRIPTIVE_TAG_NOTE}</CardDescription>
+      </CardHeader>
+
+      <CardContent className="flex flex-col gap-4">
+        <dl className="flex flex-wrap gap-x-8 gap-y-3">
+          {breakdown.counts.map((count) => (
+            <Figure
+              key={count.value}
+              term={tagValueLabel(breakdown.tag, count.value)}
+              value={`${sampleLabel(count.nLong)} · ${sampleLabel(count.nShort)}`}
+            />
+          ))}
+          <Figure
+            term={tagValueLabel(breakdown.tag, 'untagged')}
+            value={`${sampleLabel(breakdown.untaggedLong)} · ${sampleLabel(breakdown.untaggedShort)}`}
+            muted
+          />
+        </dl>
+        <p className="text-xs text-muted-foreground">
+          Longevos · de vida corta, en ese orden, dentro de {sampleLabel(breakdown.nLong)}{' '}
+          longevos y {sampleLabel(breakdown.nShort)} de vida corta en total.
+        </p>
+      </CardContent>
     </Card>
   )
 }
