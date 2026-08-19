@@ -34,18 +34,25 @@ const LINKS = [
   { href: '/listas', label: 'Listas' },
 ] as const
 
-export function Nav(): React.ReactElement {
+/**
+ * `basePath` exists for the `/ux` preview and nothing else (UC-10). It is the same nav, the
+ * same markup and the same classes — pointed at the fixture routes so that clicking through
+ * the design review does not land on a surface that needs a database. The dashboard passes
+ * nothing and gets exactly what it had.
+ */
+export function Nav({ basePath = '' }: { basePath?: string }): React.ReactElement {
   const pathname = usePathname()
 
   return (
     <nav aria-label="Secciones" className="flex items-center gap-1">
       {LINKS.map((link) => {
+        const href = `${basePath}${link.href}`
         // Prefix match so `/creativos/abc123` keeps "Creativos" lit.
-        const active = pathname === link.href || pathname.startsWith(`${link.href}/`)
+        const active = pathname === href || pathname.startsWith(`${href}/`)
         return (
           <Link
             key={link.href}
-            href={link.href}
+            href={href}
             // Communicated to assistive tech as well as visually — the colour change alone
             // says nothing to a screen reader.
             aria-current={active ? 'page' : undefined}

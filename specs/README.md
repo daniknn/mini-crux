@@ -27,6 +27,7 @@ starts the day UC-1 lands, and it runs in the background while UC-2 through UC-4
 | [UC-7](UC-7-proxy-validation.md) | Validating the survival proxy against real delivery | `done` | UC-1, UC-3, UC-5, UC-6 |
 | [UC-8](UC-8-semantic-tagging.md) | Semantic tagging via VLM (hook type, people on screen, tone) | `done` | UC-2, UC-5 |
 | [UC-9](UC-9-workspace-provisioning.md) | Workspace provisioning from Clerk | `done` | UC-0 |
+| [UC-10](UC-10-ux-preview.md) | Reviewable UI without a database | `done` | UC-4, UC-5, UC-7, UC-8 |
 
 UC-6 is the one that makes the sequencing rationale above true rather than aspirational. The
 daily tick has been enqueueing `crawl` jobs that no process consumes, so the clock that was
@@ -55,6 +56,14 @@ have shipped with it. Migration `0001` has said since day one that the tenant is
 `workspaces` row every RLS policy in the product resolves against. It surfaced while working
 out what a first deploy actually needs, which is the only reason it is numbered last rather
 than first. Nothing else in the list can be *used* until it lands.
+
+UC-10 inverts the order the rest of this list assumes. Seven surfaces have shipped and none has
+been seen in a browser: every dashboard page opens with `withWorkspace`, so rendering one needs
+a Clerk session, a migrated Postgres, and the `workspaces` row UC-9 provisions — five accounts
+that do not exist yet. And a fresh environment would show seven empty states anyway, since the
+states worth reviewing (a refused analysis, a censored duration, a suspect crawl) are the ones
+only a mature panel produces. So the design review runs first, against typed fixtures, and the
+external tools get connected after.
 
 ## Closing ritual
 

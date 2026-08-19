@@ -162,6 +162,19 @@ These are silent. Nothing crashes, the tests stay green, and the survival estima
 - **Prove a test can fail before trusting it.** Panel tests pass vacuously with alarming ease
   — a suite that only asserts "rows exist" is satisfied by almost any bug. Each of the three
   rules above was verified by mutating the source and confirming the specific test went red.
+- **A guard that parses source with a lazy regex must anchor on the unambiguous token and scan
+  *backwards*.** `preview-isolation.test.ts` walks the `(preview)` import graph and originally
+  matched `/(?:import|export)\s+([\s\S]*?)\s+from\s+['"]…['"]/g`. Read forwards, that pattern
+  starts on `export type GalleryAdvertiser = Awaited<…>` — a line with no `from` — and the lazy
+  middle bridges across to the *next* real import anywhere later in the file, capturing a clause
+  that begins with `type` and so recording a genuine value import as erased. Measured: appending
+  `import { withWorkspace } from '../server/db.ts'` to `views/creativos.tsx` left the suite
+  green, which is precisely the failure the guard exists to catch, in the file most likely to
+  produce it. `from '…'` is unambiguous; the keyword is not. Anchor there, look back to the
+  nearest `import`/`export`, and **reject** any clause that is not `[\w$*,{}\s]*` — a `=`, `<`
+  or `(` in the span means the two ends belong to different statements. General form: **a
+  guardrail that reads code is itself code that needs mutating, and the mutation to try is the
+  one the real codebase already contains.**
 - **`> 0` and `is not None` are not assertions, they are decoration.** A feature measured over
   the wrong window is still positive, still non-null, still a complete-looking row. UC-2's
   `cuts_per_second` was divided by the full duration instead of the analyzed span and the

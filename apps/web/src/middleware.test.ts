@@ -64,6 +64,8 @@ describe('middleware', () => {
     ['/api/health', 'liveness must answer before anything else works'],
     ['/sign-in', 'the sign-in page cannot require being signed in'],
     ['/sign-up/continue', 'nor can any step of the sign-up flow'],
+    ['/ux', 'the design preview has no database and no session to gate'],
+    ['/ux/creativos', 'and neither does any surface under it'],
   ])('leaves %s to its own gate — %s', async (pathname) => {
     expect(await requiresSession(pathname)).toBe(false)
   })
@@ -82,16 +84,29 @@ describe('middleware', () => {
   })
 
   /**
-   * The public-route list only means anything for paths the middleware actually runs on, and
-   * that set is the matcher. Asserted through a compiled `RegExp` rather than by reading the
-   * string, because a matcher that stopped covering the API namespace would take the webhook
-   * out of `clerkMiddleware` entirely — and every assertion above would still pass, since the
-   * handler is called directly here.
+   * The public-route list is the second line for `/ux`. The first is the matcher, which keeps
+   * the middleware — and therefore Clerk — from running on those requests at all.
+   *
+   * Asserted through a compiled `RegExp` rather than by reading the string, because the string
+   * is the one thing that cannot be wrong in a way anybody notices: a matcher that
+   * accidentally still covers `/ux` produces a preview that works on a laptop with Clerk
+   * keyless mode reachable and redirects to sign-in on one without a network, which is the
+   * machine the design review is most likely to happen on.
    */
   describe('matcher', () => {
     const pattern = new RegExp(`^${config.matcher[0]!}$`)
 
-    it.each([['/'], ['/listas'], ['/creativos']])('runs on %s', (pathname) => {
+    it.each([['/ux'], ['/ux/creativos'], ['/ux/creativos/abc-123']])(
+      'does not run at all on %s',
+      (pathname) => {
+        expect(pattern.test(pathname)).toBe(false)
+      },
+    )
+
+    it.each([['/listas'], ['/creativos'], ['/uxo-algo']])('still runs on %s', (pathname) => {
+      // `/uxo-algo` is the one that matters: the exclusion is `ux` followed by a slash or the
+      // end of the path, so a future product route whose name starts with those two letters
+      // does not fall out of the session gate by accident.
       expect(pattern.test(pathname)).toBe(true)
     })
   })

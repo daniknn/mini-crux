@@ -4,6 +4,7 @@ import { newTraceId } from '@mini-crux/core'
 import { createWatchlist, renameWatchlist, setWatchlistActive } from '@mini-crux/db/dashboard'
 import { revalidatePath } from 'next/cache'
 
+import type { ActionResult } from '../../../lib/watchlist-actions.ts'
 import { currentClerkUserId, withWorkspace } from '../../../server/db.ts'
 
 /**
@@ -18,13 +19,11 @@ import { currentClerkUserId, withWorkspace } from '../../../server/db.ts'
  * every observation in place; deleting would cascade the crawl runs and take months of
  * longitudinal history with it, and that history cannot be backfilled (rule 1). An operator
  * tidying up their lists must not be able to destroy the panel.
+ *
+ * `ActionResult` lives in `lib/watchlist-actions.ts` rather than here: a `'use server'` module
+ * may only export async functions, and the forms that render the result must not import a file
+ * that reaches Postgres (UC-10).
  */
-
-export interface ActionResult {
-  ok: boolean
-  /** Mexican Spanish, shown directly to the operator. */
-  message: string
-}
 
 const KINDS = new Set(['keyword', 'page'])
 

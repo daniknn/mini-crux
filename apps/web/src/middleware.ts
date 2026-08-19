@@ -24,6 +24,10 @@ const isPublicRoute = createRouteMatcher([
   // every delivery answered 200-with-HTML, and no workspace ever provisioned — the exact
   // silent-empty-dashboard failure this route exists to prevent.
   '/api/webhooks/clerk',
+  // The dev-only design preview (UC-10). Listed for the same reason the matcher below
+  // excludes it — see there. Belt and braces: if the matcher is ever widened, this keeps
+  // `/ux` out of the session gate instead of silently bouncing a design review to sign-in.
+  '/ux(.*)',
 ])
 
 export default clerkMiddleware(async (auth, request) => {
@@ -35,7 +39,16 @@ export default clerkMiddleware(async (auth, request) => {
 export const config = {
   matcher: [
     // Skip Next internals and static files unless they appear in search params.
-    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    //
+    // `ux` is excluded here, not just marked public above, because the two do different
+    // things. Marking it public would still run `clerkMiddleware`, and `clerkMiddleware`
+    // needs a Clerk instance — in keyless mode it provisions one over the network. The whole
+    // premise of UC-10 is that the design review runs with no accounts and no network, so a
+    // route that reaches Clerk at all is a route that can fail for a reason that has nothing
+    // to do with the pixels under review. Excluded, the middleware never runs.
+    //
+    // `ux(?:/|$)` and not `ux` so that a future `/uxo-algo` product route stays gated.
+    '/((?!_next|ux(?:/|$)|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
     '/(api|trpc)(.*)',
   ],
 }

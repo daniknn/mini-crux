@@ -2,15 +2,10 @@
 
 import { useActionState } from 'react'
 
-import { Badge } from '../../../components/ui/badge.tsx'
-import { Button } from '../../../components/ui/button.tsx'
-import { Field, Input } from '../../../components/ui/input.tsx'
-import {
-  createWatchlistAction,
-  renameWatchlistAction,
-  setWatchlistActiveAction,
-  type ActionResult,
-} from './actions.ts'
+import { Badge } from '../components/ui/badge.tsx'
+import { Button } from '../components/ui/button.tsx'
+import { Field, Input } from '../components/ui/input.tsx'
+import type { ActionResult, WatchlistAction } from '../lib/watchlist-actions.ts'
 
 /**
  * The only client components in the dashboard.
@@ -23,6 +18,15 @@ import {
  * through a `revalidatePath`, which on a cold connection is slow enough for an operator to
  * press twice; disabling the button while it is in flight is what stops the second press
  * creating a duplicate list.
+ *
+ * WHY THE ACTIONS ARRIVE AS PROPS (UC-10)
+ *
+ * They used to be imported from `../app/(dashboard)/listas/actions.ts`, which reaches
+ * `withWorkspace`, which reaches Clerk and `pg`. That import is what would drag the whole
+ * server into the `/ux` preview and make its isolation rule unenforceable. Taking the action
+ * as a prop costs one line per form and buys a component that renders identically whether the
+ * caller hands it the real write or a stub that politely refuses — which is exactly what the
+ * preview needs it to do.
  */
 
 /** Shown under every form. `aria-live` so the outcome reaches a screen reader too. */
@@ -43,8 +47,8 @@ function Result({ state }: { state: ActionResult | null }): React.ReactElement {
   )
 }
 
-export function CreateWatchlistForm(): React.ReactElement {
-  const [state, formAction, pending] = useActionState(createWatchlistAction, null)
+export function CreateWatchlistForm({ action }: { action: WatchlistAction }): React.ReactElement {
+  const [state, formAction, pending] = useActionState(action, null)
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
@@ -99,13 +103,15 @@ export function CreateWatchlistForm(): React.ReactElement {
 }
 
 export function RenameWatchlistForm({
+  action,
   id,
   label,
 }: {
+  action: WatchlistAction
   id: string
   label: string
 }): React.ReactElement {
-  const [state, formAction, pending] = useActionState(renameWatchlistAction, null)
+  const [state, formAction, pending] = useActionState(action, null)
 
   return (
     <form action={formAction} className="flex flex-col gap-2">
@@ -128,13 +134,15 @@ export function RenameWatchlistForm({
 }
 
 export function ToggleWatchlistForm({
+  action,
   id,
   isActive,
 }: {
+  action: WatchlistAction
   id: string
   isActive: boolean
 }): React.ReactElement {
-  const [state, formAction, pending] = useActionState(setWatchlistActiveAction, null)
+  const [state, formAction, pending] = useActionState(action, null)
 
   return (
     <form action={formAction} className="flex flex-col gap-2">
