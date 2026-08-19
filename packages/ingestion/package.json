@@ -11,11 +11,13 @@
   },
   "scripts": {
     "crawl:once": "node src/cli.ts",
+    "proxy-validation:once": "node src/proxy-validation-cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "echo \"(lint: no linter configured yet)\""
   },
   "dependencies": {
+    "@mini-crux/analysis": "workspace:*",
     "@mini-crux/core": "workspace:*",
     "@mini-crux/db": "workspace:*",
     "@supabase/supabase-js": "^2.47.10",

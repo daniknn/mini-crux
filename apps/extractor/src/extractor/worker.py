@@ -25,7 +25,15 @@ from pathlib import Path
 
 from .backends import AudioBackend, OcrBackend, TranscriptBackend
 from .features import FEATURE_SCHEMA_VERSION, CreativeFeatures
-from .media import LandedMedia, MediaFetchError, MediaStore, land
+from .media import (
+    LandedMedia,
+    MediaFetchError,
+    MediaStore,
+    land,
+    land_poster,
+    poster_path,
+    semantic_frame_path,
+)
 from .pipeline import DEFAULT_CAP_S, extract
 from .store import Creative, DuplicateMessage, Job, JobStore
 from .video import UnreadableMedia
@@ -42,7 +50,12 @@ DEFAULT_HEARTBEAT_INTERVAL_S = 15.0
 #: transiently overloaded machine, and neither is helped by trying again immediately.
 BACKOFF_BASE_S = 30.0
 
-EXTRACTOR_VERSION = "uc2.1"
+#: Stamped on every features row as provenance. Distinct from `FEATURE_SCHEMA_VERSION`: that
+#: one pins what the numbers *mean* and forces a re-extraction when it changes, this one
+#: records which build produced them. They move independently — a bug fix in the sampler
+#: changes this and not the definitions — so leaving it stale makes a row untraceable to the
+#: code that wrote it, which is the one question worth asking when a measurement looks wrong.
+EXTRACTOR_VERSION = "uc4.1"
 
 
 class PermanentJobError(RuntimeError):
@@ -219,4 +232,60 @@ class ExtractWorker:
                 raise PermanentJobError(str(exc)) from exc
 
         features.schema_version = schema_version
+        self._store_poster(features, media)
+        self._store_semantic_frames(features, media)
         return features, media
+
+    def _store_poster(self, features: CreativeFeatures, media: LandedMedia) -> None:
+        """Upload the encoded poster and record its path. Never fails the job.
+
+        The order matters: the path is set *after* the upload returns, so a storage outage
+        leaves `poster_storage_path` null with `poster_storage_path` in `skipped_features`
+        — a creative the gallery renders as a text card. Setting the path first and
+        uploading after would leave a non-null column pointing at an object that does not
+        exist, which is a broken image the schema insists is fine.
+
+        A missing poster is a missing poster, not a missing feature row (spec: best-effort,
+        never fails the job). Everything else about this creative was measured correctly and
+        belongs in the panel.
+        """
+        if features.poster_jpeg is None:
+            return
+
+        try:
+            features.poster_storage_path = land_poster(
+                self._media_store,
+                poster_path(media.path, features.schema_version),
+                features.poster_jpeg,
+            )
+        except Exception:
+            logger.warning("could not store poster for %s", media.path, exc_info=True)
+            features.skip("poster_storage_path")
+
+    def _store_semantic_frames(self, features: CreativeFeatures, media: LandedMedia) -> None:
+        """Upload the sampled frames and record their paths. Never fails the job.
+
+        All-or-nothing, unlike the poster's single column: `semantic_frame_paths` is one
+        array, and writing a partial list would leave the tagging job reading a path for a
+        frame that never made it to storage — the same broken-image failure mode
+        `_store_poster` avoids, just multiplied by three. A storage outage partway through
+        the uploads is therefore a skip for the whole feature, not a shorter array.
+        """
+        if not features.semantic_frame_jpegs:
+            return
+
+        try:
+            paths = [
+                land_poster(
+                    self._media_store,
+                    semantic_frame_path(media.path, features.schema_version, index),
+                    jpeg,
+                )
+                for index, jpeg in enumerate(features.semantic_frame_jpegs)
+            ]
+        except Exception:
+            logger.warning("could not store semantic frames for %s", media.path, exc_info=True)
+            features.skip("semantic_frame_paths")
+            return
+
+        features.semantic_frame_paths = paths

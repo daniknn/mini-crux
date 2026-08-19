@@ -11,6 +11,7 @@ insert into public.creative_features (
   text_in_first_2s, text_density,
   first_line_transcript, full_transcript, audio_energy_variance,
   analysis_cap_s, truncated, skipped_features,
+  poster_storage_path, semantic_frame_paths,
   extractor_version, trace_id, extracted_at
 )
 values (
@@ -20,7 +21,8 @@ values (
   $10::boolean, $11::numeric,
   $12::text, $13::text, $14::double precision,
   $15::numeric, $16::boolean, $17::text[],
-  $18::text, $19::text, now()
+  $18::text, $19::text[],
+  $20::text, $21::text, now()
 )
 on conflict (creative_id, schema_version) do update
 set media_storage_path    = excluded.media_storage_path,
@@ -37,6 +39,8 @@ set media_storage_path    = excluded.media_storage_path,
     analysis_cap_s        = excluded.analysis_cap_s,
     truncated             = excluded.truncated,
     skipped_features      = excluded.skipped_features,
+    poster_storage_path   = excluded.poster_storage_path,
+    semantic_frame_paths  = excluded.semantic_frame_paths,
     extractor_version     = excluded.extractor_version,
     trace_id              = excluded.trace_id,
     extracted_at          = excluded.extracted_at,
