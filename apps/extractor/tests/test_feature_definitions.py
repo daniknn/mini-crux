@@ -24,8 +24,9 @@ from extractor.features import (
 )
 
 # Bump FEATURE_SCHEMA_VERSION and update this digest together, in the same commit.
-EXPECTED_DIGEST = "3507d14e9fdd63c7"
-EXPECTED_VERSION = 1
+# v3 adds semantic_hook_frame_s (UC-8 frame sampling).
+EXPECTED_DIGEST = "d44472bacaee95ec"
+EXPECTED_VERSION = 3
 
 
 def test_definitions_are_pinned_to_the_schema_version() -> None:

@@ -30,6 +30,97 @@ from .store import Creative, DuplicateMessage, Job
 # ---------------------------------------------------------------------------------
 
 
+#: Scene colours, far apart in luminance so a scene change clears the cut threshold by a
+#: wide margin. Exported because the poster tests identify *which* scene a frame came from,
+#: and a palette copied into the test would drift from the one the generator uses.
+SCENE_PALETTE = [(20, 20, 20), (230, 230, 230), (20, 200, 20), (200, 20, 200), (240, 240, 20)]
+
+
+def _write(path: Path, frames: Any, fps: int, size: tuple[int, int]) -> Path:
+    width, height = size
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+    if not writer.isOpened():
+        raise RuntimeError("OpenCV could not open an mp4v writer")
+    try:
+        for frame in frames:
+            writer.write(frame)
+    finally:
+        writer.release()
+
+    if not path.exists() or path.stat().st_size == 0:
+        raise RuntimeError(f"video writer produced nothing at {path}")
+    return path
+
+
+def make_segment_video(
+    path: Path,
+    segments: list[tuple[float, tuple[int, int, int]]],
+    *,
+    fps: int = 24,
+    size: tuple[int, int] = (320, 240),
+) -> Path:
+    """Flat-colour segments of explicitly given (seconds, BGR).
+
+    `make_video` divides a duration into equal scenes, which is convenient and useless for
+    the poster: the frame it picks always lands in the opening scene, so an implementation
+    that cut at t=0 would produce the identical colour and the test would pass. Uneven
+    segments — specifically a short dark lead-in — are what make the two distinguishable.
+    """
+    width, height = size
+
+    def frames() -> Any:
+        for seconds, colour in segments:
+            for _ in range(max(1, int(round(seconds * fps)))):
+                yield np.full((height, width, 3), colour, dtype=np.uint8)
+
+    return _write(path, frames(), fps, size)
+
+
+def make_ramp_video(
+    path: Path,
+    *,
+    ramp_s: float = 4.0,
+    tail_s: float = 1.0,
+    peak: int = 200,
+    fps: int = 24,
+    size: tuple[int, int] = (320, 240),
+) -> Path:
+    """A slow brightness ramp, then one hard cut into green.
+
+    The ramp is the point. Every frame of it is a different, *identifiable* brightness, so a
+    poster taken at 2.0s, at 1.0s and at 0.0s are three distinguishable images — which is
+    what lets a test tell "half the first cut" apart from "the fallback" and from "the first
+    frame". Against a flat opening shot all three produce the same pixels and the test
+    proves nothing.
+
+    The ramp rises slowly enough not to register as a cut: ~4 units of mean per-pixel change
+    between sampled frames, against a `CUT_DIFF_THRESHOLD` of 12.
+    """
+    width, height = size
+    ramp_frames = max(1, int(round(ramp_s * fps)))
+
+    def frames() -> Any:
+        for index in range(ramp_frames):
+            value = int(peak * index / ramp_frames)
+            yield np.full((height, width, 3), (value, value, value), dtype=np.uint8)
+        for _ in range(max(1, int(round(tail_s * fps)))):
+            yield np.full((height, width, 3), (20, 200, 20), dtype=np.uint8)
+
+    return _write(path, frames(), fps, size)
+
+
+def decode_jpeg(data: bytes) -> Any:
+    frame = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise RuntimeError("poster bytes are not a decodable JPEG")
+    return frame
+
+
+def mean_bgr(frame: Any) -> tuple[float, float, float]:
+    b, g, r = frame.reshape(-1, 3).mean(axis=0)
+    return float(b), float(g), float(r)
+
+
 def make_video(
     path: Path,
     *,
@@ -45,25 +136,16 @@ def make_video(
     different codec build rather than on a real regression.
     """
     width, height = size
-    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
-    if not writer.isOpened():
-        raise RuntimeError("OpenCV could not open an mp4v writer")
-
     total_frames = max(1, int(round(seconds * fps)))
     frames_per_scene = max(1, total_frames // max(1, scenes))
-    palette = [(20, 20, 20), (230, 230, 230), (20, 200, 20), (200, 20, 200), (240, 240, 20)]
 
-    try:
+    def frames() -> Any:
         for index in range(total_frames):
             scene = min(index // frames_per_scene, scenes - 1)
-            frame = np.full((height, width, 3), palette[scene % len(palette)], dtype=np.uint8)
-            writer.write(frame)
-    finally:
-        writer.release()
+            colour = SCENE_PALETTE[scene % len(SCENE_PALETTE)]
+            yield np.full((height, width, 3), colour, dtype=np.uint8)
 
-    if not path.exists() or path.stat().st_size == 0:
-        raise RuntimeError(f"video writer produced nothing at {path}")
-    return path
+    return _write(path, frames(), fps, size)
 
 
 def make_image(path: Path, *, size: tuple[int, int] = (320, 240)) -> Path:
@@ -340,6 +422,61 @@ class FlakyMediaStore:
         if self._remaining > 0:
             self._remaining -= 1
             raise RuntimeError("storage temporarily unavailable")
+        return self._inner.get(path)
+
+
+class PosterHostileMediaStore:
+    """Accepts every write except the poster's.
+
+    The poster upload is the one storage call the worker is allowed to lose, so it needs a
+    store that fails *only* that call. `FlakyMediaStore` fails the download and turns the
+    job into a retry, which never reaches the poster; a store that failed every `put` would
+    never land the media either, and the job would fail long before there was a poster to
+    lose. Narrowing the failure to the poster key is what leaves everything else about the
+    creative measured and lets the test assert that the row is complete apart from one
+    column.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.refused = 0
+
+    def exists(self, path: str) -> bool:
+        return self._inner.exists(path)
+
+    def put(self, path: str, data: bytes, *, content_type: str) -> None:
+        if ".poster." in path:
+            self.refused += 1
+            raise RuntimeError("storage unavailable")
+        self._inner.put(path, data, content_type=content_type)
+
+    def get(self, path: str) -> bytes:
+        return self._inner.get(path)
+
+
+class SemanticFrameHostileMediaStore:
+    """Accepts every write except the semantic frames'. Poster's mirror image.
+
+    Same narrowing reasoning as `PosterHostileMediaStore`, aimed at the other JPEGs the
+    worker uploads: failing only `.semantic.` keys proves the poster and every measured
+    feature survive a storage outage confined to frame sampling, and that the failure costs
+    the whole array rather than a partial one (`_store_semantic_frames` is all-or-nothing).
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.refused = 0
+
+    def exists(self, path: str) -> bool:
+        return self._inner.exists(path)
+
+    def put(self, path: str, data: bytes, *, content_type: str) -> None:
+        if ".semantic." in path:
+            self.refused += 1
+            raise RuntimeError("storage unavailable")
+        self._inner.put(path, data, content_type=content_type)
+
+    def get(self, path: str) -> bytes:
         return self._inner.get(path)
 
 

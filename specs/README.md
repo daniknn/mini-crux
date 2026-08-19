@@ -20,9 +20,33 @@ starts the day UC-1 lands, and it runs in the background while UC-2 through UC-4
 | [UC-0](UC-0-scaffold-and-contracts.md) | Scaffold and cross-cutting contracts | `done` | — |
 | [UC-1](UC-1-daily-ingestion.md) | Daily Ad Library ingestion → survival panel | `done` | UC-0 |
 | [UC-2](UC-2-feature-extraction.md) | Structural feature extraction from video | `done` | UC-1 |
-| [UC-3](UC-3-survival-panel.md) | Survival derivation with censoring | `todo` | UC-1 |
-| [UC-4](UC-4-descriptive-dashboard.md) | Descriptive competitive dashboard (Layer 1) | `todo` | UC-2, UC-3 |
-| [UC-5](UC-5-correlational-analysis.md) | Cohort contrast analysis (Layer 2) | `todo` | UC-3, UC-4 |
+| [UC-3](UC-3-survival-panel.md) | Survival derivation with censoring | `done` | UC-1 |
+| [UC-4](UC-4-descriptive-dashboard.md) | Descriptive competitive dashboard (Layer 1) | `done` | UC-2, UC-3 |
+| [UC-5](UC-5-correlational-analysis.md) | Cohort contrast analysis (Layer 2) | `done` | UC-3, UC-4 |
+| [UC-6](UC-6-go-live.md) | Go live: closing the loop between the tick and the panel | `done` | UC-1, UC-2, UC-5 |
+| [UC-7](UC-7-proxy-validation.md) | Validating the survival proxy against real delivery | `done` | UC-1, UC-3, UC-5, UC-6 |
+| [UC-8](UC-8-semantic-tagging.md) | Semantic tagging via VLM (hook type, people on screen, tone) | `done` | UC-2, UC-5 |
+
+UC-6 is the one that makes the sequencing rationale above true rather than aspirational. The
+daily tick has been enqueueing `crawl` jobs that no process consumes, so the clock that was
+supposed to start with UC-1 has not started. Until UC-6 lands, the 8-week count is not going
+down.
+
+UC-7 tests the premise the whole panel rests on — that survival tracks advertiser behavior —
+against real delivery data, using the EU Ad Library's retained `eu_total_reach` for finished
+Spanish ads. It runs alongside the MX panel rather than gating it: see
+`specs/UC-7-proxy-validation.md` for why a null result changes what the product says, not what
+it computes.
+
+UC-5 is the exception to "the panel needs 8 weeks first". What it ships now is the **gate**: the
+analysis refuses on a thin panel and states how much longer it needs. The engine is built and
+tested against reference fixtures; only the threshold *values* wait for a real distribution.
+
+UC-8 is the semantic-tagging pass `ARCHITECTURE.md` §10.2 named and deferred when UC-2 shipped
+structural features only. It adds one boolean feature (`has_people_on_screen`) to UC-5's
+existing contrast engine and two categorical tags (`hook_type`, `tone`) shown descriptively —
+see `specs/UC-8-semantic-tagging.md` for why the categorical tags are not run through a
+hypothesis test in v1.
 
 ## Closing ritual
 
